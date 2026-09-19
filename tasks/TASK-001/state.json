@@ -1,0 +1,44 @@
+{
+  "id": "TASK-001",
+  "title": "Модели ролей, название приложения и Git",
+  "stage": "TESTING",
+  "updatedAt": "2026-09-19T19:34:37.8803203Z",
+  "history": [
+    {
+      "to": "ANALYSIS",
+      "at": "2026-09-19T19:31:41.8637765Z",
+      "from": null,
+      "reason": "Created"
+    },
+    {
+      "reason": "Требования и публичная видимость заданы заказчиком",
+      "to": "PLANNING",
+      "from": "ANALYSIS",
+      "at": "2026-09-19T19:33:55.413381Z"
+    },
+    {
+      "reason": "Спецификации подготовки проекта готовы",
+      "to": "CODING",
+      "from": "PLANNING",
+      "at": "2026-09-19T19:33:55.4556023Z"
+    },
+    {
+      "at": "2026-09-19T19:34:37.8257547Z",
+      "reason": "Completed implementation.md",
+      "to": "INVARIANT_VALIDATION",
+      "from": "CODING"
+    },
+    {
+      "at": "2026-09-19T19:34:37.8665438Z",
+      "reason": "Completed invariants.md",
+      "to": "CODE_REVIEW",
+      "from": "INVARIANT_VALIDATION"
+    },
+    {
+      "at": "2026-09-19T19:34:37.8803203Z",
+      "reason": "Completed review.md",
+      "to": "TESTING",
+      "from": "CODE_REVIEW"
+    }
+  ]
+}
