@@ -1,8 +1,8 @@
 {
   "id": "TASK-001",
   "title": "Модели ролей, название приложения и Git",
-  "stage": "TESTING",
-  "updatedAt": "2026-09-19T19:34:37.8803203Z",
+  "stage": "DONE",
+  "updatedAt": "2026-09-19T19:58:13.1606842Z",
   "history": [
     {
       "to": "ANALYSIS",
@@ -39,6 +39,12 @@
       "reason": "Completed review.md",
       "to": "TESTING",
       "from": "CODE_REVIEW"
+    },
+    {
+      "from": "TESTING",
+      "at": "2026-09-19T19:58:13.1606842Z",
+      "reason": "SSH-вход и push подтверждены; remote main совпадает с локальным HEAD",
+      "to": "DONE"
     }
   ]
 }
