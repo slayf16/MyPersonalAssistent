@@ -24,7 +24,11 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 data class DeepSeekConfig(val model: String = "deepseek-flash")
-class DeepSeekLlm(private val credentials: CredentialRepository, private val config: DeepSeekConfig = DeepSeekConfig(), private val client: HttpClient = HttpClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }; install(HttpTimeout) { connectTimeoutMillis = 15_000; requestTimeoutMillis = 120_000; socketTimeoutMillis = 120_000 } }) : Llm {
+class DeepSeekLlm(
+    private val credentials: CredentialRepository,
+    private val config: DeepSeekConfig = DeepSeekConfig(),
+    private val client: HttpClient
+) : Llm {
     override suspend fun execute(request: LlmRequest): LlmResult {
         if (request.messages.sumOf { it.text.toByteArray().size } > 1_048_576) return LlmResult.Failure(LlmError.CONTEXT_TOO_LARGE)
         val key = credentials.readApiKey() ?: return LlmResult.Failure(LlmError.AUTHORIZATION)

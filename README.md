@@ -26,6 +26,8 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 
 APK появляется по пути `app/build/outputs/apk/debug/app-debug.apk`. Для реального DeepSeek smoke-теста введите действующий ключ в UI: ключ не должен попадать в файлы, фикстуры или CI.
 
+В debug-сборке Ktor записывает в Android Studio Logcat безопасные метаданные запросов с тегом `Network`: id, метод, host/path, HTTP status, длительность либо категорию ошибки/отмены. Для просмотра задайте фильтр `tag:Network`. Заголовки, ключ, query-параметры, тела сообщений и сырые тексты исключений не выводятся; в release-сборке эти записи выключены.
+
 ## Архитектура
 
 ```text
@@ -65,4 +67,3 @@ Room v1 сохраняет снимок чата: `id`, `title`, `createdAt`, `u
 Все прямые зависимости, лицензии, GitHub-источники и проверка порога 30 звёзд приведены в [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md). Исключение для официального AGP зафиксировано отдельно в [docs/decisions/2026-09-19-agp-source-exception.md](docs/decisions/2026-09-19-agp-source-exception.md).
 
 Рабочий процесс описан в [docs/WORKFLOW.md](docs/WORKFLOW.md). Задачи и отчёты агента хранятся только локально в `tasks/` и не публикуются в Git.
-
