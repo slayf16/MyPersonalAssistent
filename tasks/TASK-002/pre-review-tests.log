@@ -1,0 +1,589 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :core:credentials:api:preBuild UP-TO-DATE
+> Task :core:credentials:api:preDebugBuild UP-TO-DATE
+> Task :core:credentials:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:credentials:impl:preBuild UP-TO-DATE
+> Task :core:credentials:impl:preDebugBuild UP-TO-DATE
+> Task :core:credentials:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:dataBase:api:preBuild UP-TO-DATE
+> Task :core:dataBase:api:preDebugBuild UP-TO-DATE
+> Task :core:dataBase:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:dataBase:impl:preBuild UP-TO-DATE
+> Task :core:dataBase:impl:preDebugBuild UP-TO-DATE
+> Task :core:dataBase:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:history:api:preBuild UP-TO-DATE
+> Task :core:history:api:preDebugBuild UP-TO-DATE
+> Task :core:history:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:history:impl:preBuild UP-TO-DATE
+> Task :core:history:impl:preDebugBuild UP-TO-DATE
+> Task :core:history:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:llm:api:preBuild UP-TO-DATE
+> Task :core:llm:api:preDebugBuild UP-TO-DATE
+> Task :core:llm:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:llm:impl:preBuild UP-TO-DATE
+> Task :core:llm:impl:preDebugBuild UP-TO-DATE
+> Task :core:llm:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:chat:api:preBuild UP-TO-DATE
+> Task :feature:chat:api:preDebugBuild UP-TO-DATE
+> Task :feature:chat:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:chat:impl:preBuild UP-TO-DATE
+> Task :feature:chat:impl:preDebugBuild UP-TO-DATE
+> Task :feature:chat:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:credentials:api:preBuild UP-TO-DATE
+> Task :feature:credentials:api:preDebugBuild UP-TO-DATE
+> Task :feature:credentials:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:credentials:impl:preBuild UP-TO-DATE
+> Task :feature:credentials:impl:preDebugBuild UP-TO-DATE
+> Task :feature:credentials:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:home:api:preBuild UP-TO-DATE
+> Task :feature:home:api:preDebugBuild UP-TO-DATE
+> Task :feature:home:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:home:impl:preBuild UP-TO-DATE
+> Task :feature:home:impl:preDebugBuild UP-TO-DATE
+> Task :feature:home:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:credentials:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:credentials:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:dataBase:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:dataBase:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:history:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:history:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:llm:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:llm:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:chat:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:chat:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:credentials:api:processDebugNavigationResources UP-TO-DATE
+> Task :app:checkDebugAarMetadata
+> Task :feature:credentials:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:home:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:home:impl:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:api:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:api:generateDebugResources UP-TO-DATE
+> Task :core:credentials:api:packageDebugResources UP-TO-DATE
+> Task :core:credentials:impl:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:impl:generateDebugResources UP-TO-DATE
+> Task :core:credentials:impl:packageDebugResources UP-TO-DATE
+> Task :core:dataBase:api:generateDebugResValues UP-TO-DATE
+> Task :core:dataBase:api:generateDebugResources UP-TO-DATE
+> Task :core:dataBase:api:packageDebugResources UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugResValues UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugResources UP-TO-DATE
+> Task :core:dataBase:impl:packageDebugResources UP-TO-DATE
+> Task :core:history:api:generateDebugResValues UP-TO-DATE
+> Task :core:history:api:generateDebugResources UP-TO-DATE
+> Task :core:history:api:packageDebugResources UP-TO-DATE
+> Task :core:history:impl:generateDebugResValues UP-TO-DATE
+> Task :core:history:impl:generateDebugResources UP-TO-DATE
+> Task :core:history:impl:packageDebugResources UP-TO-DATE
+> Task :core:llm:api:generateDebugResValues UP-TO-DATE
+> Task :core:llm:api:generateDebugResources UP-TO-DATE
+> Task :core:llm:api:packageDebugResources UP-TO-DATE
+> Task :core:llm:impl:generateDebugResValues UP-TO-DATE
+> Task :core:llm:impl:generateDebugResources UP-TO-DATE
+> Task :core:llm:impl:packageDebugResources UP-TO-DATE
+> Task :feature:chat:api:generateDebugResValues UP-TO-DATE
+> Task :feature:chat:api:generateDebugResources UP-TO-DATE
+> Task :feature:chat:api:packageDebugResources UP-TO-DATE
+> Task :feature:chat:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:chat:impl:generateDebugResources UP-TO-DATE
+> Task :feature:chat:impl:packageDebugResources UP-TO-DATE
+> Task :feature:credentials:api:generateDebugResValues UP-TO-DATE
+> Task :feature:credentials:api:generateDebugResources UP-TO-DATE
+> Task :feature:credentials:api:packageDebugResources UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugResources UP-TO-DATE
+> Task :feature:credentials:impl:packageDebugResources UP-TO-DATE
+> Task :feature:home:api:generateDebugResValues UP-TO-DATE
+> Task :feature:home:api:generateDebugResources UP-TO-DATE
+> Task :feature:home:api:packageDebugResources UP-TO-DATE
+> Task :feature:home:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:home:impl:generateDebugResources UP-TO-DATE
+> Task :feature:home:impl:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:api:processDebugManifest UP-TO-DATE
+> Task :core:credentials:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:impl:processDebugManifest UP-TO-DATE
+> Task :core:dataBase:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:dataBase:api:processDebugManifest UP-TO-DATE
+> Task :core:dataBase:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:dataBase:impl:processDebugManifest UP-TO-DATE
+> Task :core:history:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:history:api:processDebugManifest UP-TO-DATE
+> Task :core:history:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:history:impl:processDebugManifest UP-TO-DATE
+> Task :core:llm:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:llm:api:processDebugManifest UP-TO-DATE
+> Task :core:llm:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:llm:impl:processDebugManifest UP-TO-DATE
+> Task :feature:chat:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:chat:api:processDebugManifest UP-TO-DATE
+> Task :feature:chat:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:chat:impl:processDebugManifest UP-TO-DATE
+> Task :feature:credentials:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:credentials:api:processDebugManifest UP-TO-DATE
+> Task :feature:credentials:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:credentials:impl:processDebugManifest UP-TO-DATE
+> Task :feature:home:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:home:api:processDebugManifest UP-TO-DATE
+> Task :feature:home:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:home:impl:processDebugManifest UP-TO-DATE
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :core:credentials:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:credentials:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:credentials:api:generateDebugRFile UP-TO-DATE
+> Task :core:credentials:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:credentials:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:credentials:impl:generateDebugRFile UP-TO-DATE
+> Task :core:dataBase:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:dataBase:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:dataBase:api:generateDebugRFile UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:dataBase:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugRFile UP-TO-DATE
+> Task :core:history:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:history:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:history:api:generateDebugRFile UP-TO-DATE
+> Task :core:history:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:history:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:history:impl:generateDebugRFile UP-TO-DATE
+> Task :core:llm:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:llm:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:llm:api:generateDebugRFile UP-TO-DATE
+> Task :core:llm:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:llm:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:llm:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:chat:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:chat:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:chat:api:generateDebugRFile UP-TO-DATE
+> Task :feature:chat:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:chat:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:chat:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:credentials:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:credentials:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:credentials:api:generateDebugRFile UP-TO-DATE
+> Task :feature:credentials:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:credentials:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:home:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:home:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:home:api:generateDebugRFile UP-TO-DATE
+> Task :feature:home:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:home:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:home:impl:generateDebugRFile UP-TO-DATE
+> Task :core:credentials:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:credentials:api:compileDebugKotlin UP-TO-DATE
+> Task :core:credentials:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:credentials:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:credentials:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:credentials:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:credentials:impl:compileDebugKotlin UP-TO-DATE
+> Task :core:credentials:impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:credentials:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:credentials:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:dataBase:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:dataBase:api:compileDebugKotlin UP-TO-DATE
+> Task :core:dataBase:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:dataBase:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:dataBase:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:processDebugManifestForPackage
+> Task :core:dataBase:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:dataBase:impl:kspDebugKotlin UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugKotlin UP-TO-DATE
+> Task :core:dataBase:impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:dataBase:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:history:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:history:api:compileDebugKotlin UP-TO-DATE
+> Task :core:history:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:history:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:history:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:history:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:history:impl:compileDebugKotlin UP-TO-DATE
+> Task :core:history:impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:history:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:history:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:llm:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:llm:api:compileDebugKotlin UP-TO-DATE
+> Task :core:llm:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:llm:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:llm:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:llm:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:llm:impl:compileDebugKotlin UP-TO-DATE
+> Task :core:llm:impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:llm:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:llm:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:chat:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:chat:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:chat:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:chat:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:chat:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:chat:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:chat:impl:compileDebugKotlin UP-TO-DATE
+> Task :feature:chat:impl:javaPreCompileDebug UP-TO-DATE
+> Task :feature:chat:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:chat:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:credentials:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:credentials:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:credentials:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:credentials:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:credentials:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:credentials:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:credentials:impl:compileDebugKotlin UP-TO-DATE
+> Task :feature:credentials:impl:javaPreCompileDebug UP-TO-DATE
+> Task :feature:credentials:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:credentials:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:home:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:home:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:home:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:home:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:home:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:home:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:home:impl:compileDebugKotlin UP-TO-DATE
+> Task :feature:home:impl:javaPreCompileDebug UP-TO-DATE
+> Task :feature:home:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:home:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:credentials:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:credentials:api:processDebugJavaRes UP-TO-DATE
+> Task :core:credentials:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:credentials:impl:processDebugJavaRes UP-TO-DATE
+> Task :core:dataBase:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:dataBase:api:processDebugJavaRes UP-TO-DATE
+> Task :core:dataBase:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:dataBase:impl:processDebugJavaRes UP-TO-DATE
+> Task :core:history:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:history:api:processDebugJavaRes UP-TO-DATE
+> Task :core:history:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:history:impl:processDebugJavaRes UP-TO-DATE
+> Task :core:llm:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:llm:api:processDebugJavaRes UP-TO-DATE
+> Task :core:llm:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:llm:impl:processDebugJavaRes UP-TO-DATE
+> Task :feature:chat:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:chat:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:chat:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:chat:impl:processDebugJavaRes UP-TO-DATE
+> Task :feature:credentials:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:credentials:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:credentials:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:credentials:impl:processDebugJavaRes UP-TO-DATE
+> Task :feature:home:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:home:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:home:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:home:impl:processDebugJavaRes UP-TO-DATE
+> Task :core:credentials:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:credentials:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:credentials:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :core:credentials:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:credentials:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:credentials:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:credentials:api:testDebugUnitTest NO-SOURCE
+> Task :core:credentials:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:credentials:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:credentials:impl:compileDebugUnitTestKotlin NO-SOURCE
+> Task :core:credentials:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:credentials:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:credentials:impl:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:credentials:impl:testDebugUnitTest NO-SOURCE
+> Task :core:dataBase:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:dataBase:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:dataBase:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :core:dataBase:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:dataBase:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:dataBase:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:dataBase:api:testDebugUnitTest NO-SOURCE
+> Task :core:dataBase:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:dataBase:impl:kspDebugUnitTestKotlin NO-SOURCE
+> Task :core:dataBase:impl:compileDebugUnitTestKotlin NO-SOURCE
+> Task :core:dataBase:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:dataBase:impl:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:dataBase:impl:testDebugUnitTest NO-SOURCE
+> Task :core:history:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:history:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:history:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :app:processDebugResources
+> Task :core:history:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:history:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:history:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:history:api:testDebugUnitTest NO-SOURCE
+> Task :core:history:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:history:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:history:impl:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :core:history:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:history:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:history:impl:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :core:history:impl:testDebugUnitTest UP-TO-DATE
+> Task :core:llm:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:llm:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:llm:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :core:llm:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :core:llm:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:llm:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :core:llm:api:testDebugUnitTest NO-SOURCE
+> Task :core:llm:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :core:llm:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :core:llm:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:chat:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:chat:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:chat:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :feature:chat:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:chat:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:chat:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :feature:chat:api:testDebugUnitTest NO-SOURCE
+> Task :feature:chat:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:chat:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:chat:impl:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :feature:chat:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:chat:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:chat:impl:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :feature:chat:impl:testDebugUnitTest UP-TO-DATE
+> Task :feature:credentials:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:credentials:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:credentials:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :feature:credentials:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:credentials:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:credentials:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :feature:credentials:api:testDebugUnitTest NO-SOURCE
+> Task :feature:credentials:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:credentials:impl:compileDebugUnitTestKotlin NO-SOURCE
+> Task :feature:credentials:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:credentials:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:credentials:impl:processDebugUnitTestJavaRes NO-SOURCE
+> Task :feature:credentials:impl:testDebugUnitTest NO-SOURCE
+> Task :feature:home:api:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:home:api:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:home:api:compileDebugUnitTestKotlin NO-SOURCE
+> Task :feature:home:api:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:home:api:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:home:api:processDebugUnitTestJavaRes NO-SOURCE
+> Task :feature:home:api:testDebugUnitTest NO-SOURCE
+> Task :feature:home:impl:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:home:impl:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:home:impl:compileDebugUnitTestKotlin NO-SOURCE
+> Task :feature:home:impl:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:home:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:home:impl:processDebugUnitTestJavaRes NO-SOURCE
+> Task :feature:home:impl:testDebugUnitTest NO-SOURCE
+> Task :core:credentials:impl:preDebugAndroidTestBuild UP-TO-DATE
+> Task :core:credentials:impl:checkDebugAndroidTestAarMetadata UP-TO-DATE
+> Task :core:credentials:impl:processDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :core:credentials:impl:compileDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :core:credentials:impl:generateDebugAndroidTestResValues UP-TO-DATE
+> Task :core:credentials:impl:mapDebugAndroidTestSourceSetPaths UP-TO-DATE
+> Task :core:credentials:impl:generateDebugAndroidTestResources UP-TO-DATE
+> Task :app:compileDebugKotlin
+> Task :core:credentials:impl:mergeDebugAndroidTestResources UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :core:credentials:impl:processDebugAndroidTestManifest UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin NO-SOURCE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes NO-SOURCE
+> Task :app:testDebugUnitTest NO-SOURCE
+> Task :core:credentials:impl:processDebugAndroidTestResources UP-TO-DATE
+> Task :core:credentials:impl:compileDebugAndroidTestKotlin UP-TO-DATE
+> Task :core:credentials:impl:javaPreCompileDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:impl:compileDebugAndroidTestJavaWithJavac NO-SOURCE
+> Task :core:credentials:api:mergeDebugShaders UP-TO-DATE
+> Task :core:credentials:api:compileDebugShaders NO-SOURCE
+> Task :core:credentials:api:generateDebugAssets UP-TO-DATE
+> Task :core:credentials:api:mergeDebugAssets UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestShaders UP-TO-DATE
+> Task :core:credentials:impl:compileDebugAndroidTestShaders NO-SOURCE
+> Task :core:credentials:impl:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugShaders UP-TO-DATE
+> Task :core:credentials:impl:compileDebugShaders NO-SOURCE
+> Task :core:credentials:impl:generateDebugAssets UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAssets UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestAssets UP-TO-DATE
+> Task :core:credentials:impl:compressDebugAndroidTestAssets UP-TO-DATE
+> Task :core:credentials:impl:desugarDebugAndroidTestFileDependencies UP-TO-DATE
+> Task :core:credentials:impl:dexBuilderDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestGlobalSynthetics UP-TO-DATE
+> Task :core:credentials:impl:processDebugAndroidTestJavaRes UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestJavaResource UP-TO-DATE
+> Task :core:credentials:impl:checkDebugAndroidTestDuplicateClasses UP-TO-DATE
+> Task :core:credentials:impl:mergeExtDexDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:impl:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :core:credentials:api:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :core:credentials:impl:mergeProjectDexDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:api:mergeDebugJniLibFolders UP-TO-DATE
+> Task :core:credentials:api:mergeDebugNativeLibs NO-SOURCE
+> Task :core:credentials:impl:mergeLibDexDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:api:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugJniLibFolders UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugNativeLibs NO-SOURCE
+> Task :core:credentials:impl:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestJniLibFolders UP-TO-DATE
+> Task :core:credentials:impl:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :core:credentials:impl:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :core:credentials:impl:validateSigningDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:impl:writeDebugAndroidTestSigningConfigVersions UP-TO-DATE
+> Task :core:credentials:impl:packageDebugAndroidTest UP-TO-DATE
+> Task :core:credentials:impl:createDebugAndroidTestApkListingFileRedirect UP-TO-DATE
+> Task :core:llm:impl:compileDebugUnitTestKotlin
+> Task :core:credentials:impl:connectedDebugAndroidTest
+Starting 0 tests on New_Device(AVD) - 16
+
+Finished 0 tests on New_Device(AVD) - 16
+
+> Task :core:credentials:impl:connectedDebugAndroidTest
+Test run failed to complete. Instrumentation run failed due to Process crashed.
+Logcat of last crash: 
+Process: com.mypersonalassistent.core.credentials.impl.test, PID: 5935
+java.lang.RuntimeException: Unable to instantiate instrumentation ComponentInfo{com.mypersonalassistent.core.credentials.impl.test/androidx.test.runner.AndroidJUnitRunner}: java.lang.ClassNotFoundException: Didn't find class "androidx.test.runner.AndroidJUnitRunner" on path: DexPathList[[zip file "/data/app/~~ZjyFg9whsJLxejECR6Dlyg==/com.mypersonalassistent.core.credentials.impl.test-dZO4x-QGSOfzPhvDDczO3A==/base.apk"],nativeLibraryDirectories=[/data/app/~~ZjyFg9whsJLxejECR6Dlyg==/com.mypersonalassistent.core.credentials.impl.test-dZO4x-QGSOfzPhvDDczO3A==/lib/x86_64, /system/lib64, /system_ext/lib64]]
+	at android.app.ActivityThread.initInstrumentation(ActivityThread.java:8086)
+	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:7754)
+	at android.app.ActivityThread.-$$Nest$mhandleBindApplication(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2546)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:248)
+	at android.os.Looper.loop(Looper.java:338)
+	at android.app.ActivityThread.main(ActivityThread.java:9067)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:593)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)
+Caused by: java.lang.ClassNotFoundException: Didn't find class "androidx.test.runner.AndroidJUnitRunner" on path: DexPathList[[zip file "/data/app/~~ZjyFg9whsJLxejECR6Dlyg==/com.mypersonalassistent.core.credentials.impl.test-dZO4x-QGSOfzPhvDDczO3A==/base.apk"],nativeLibraryDirectories=[/data/app/~~ZjyFg9whsJLxejECR6Dlyg==/com.mypersonalassistent.core.credentials.impl.test-dZO4x-QGSOfzPhvDDczO3A==/lib/x86_64, /system/lib64, /system_ext/lib64]]
+	at dalvik.system.BaseDexClassLoader.findClass(BaseDexClassLoader.java:259)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:637)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:573)
+	at android.app.ActivityThread.initInstrumentation(ActivityThread.java:8082)
+	... 10 more
+
+
+> Task :core:credentials:impl:connectedDebugAndroidTest FAILED
+> Task :core:llm:impl:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :core:llm:impl:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :core:llm:impl:testDebugUnitTest
+> Task :core:dataBase:impl:preDebugAndroidTestBuild UP-TO-DATE
+> Task :core:dataBase:impl:checkDebugAndroidTestAarMetadata UP-TO-DATE
+> Task :core:dataBase:impl:processDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugAndroidTestResValues UP-TO-DATE
+> Task :core:dataBase:impl:mapDebugAndroidTestSourceSetPaths UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugAndroidTestResources UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestResources UP-TO-DATE
+> Task :core:dataBase:impl:processDebugAndroidTestManifest UP-TO-DATE
+> Task :core:dataBase:impl:processDebugAndroidTestResources UP-TO-DATE
+> Task :core:dataBase:impl:kspDebugAndroidTestKotlin UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugAndroidTestKotlin UP-TO-DATE
+> Task :core:dataBase:impl:javaPreCompileDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugAndroidTestJavaWithJavac NO-SOURCE
+> Task :core:dataBase:api:mergeDebugShaders UP-TO-DATE
+> Task :core:dataBase:api:compileDebugShaders NO-SOURCE
+> Task :core:dataBase:api:generateDebugAssets UP-TO-DATE
+> Task :core:dataBase:api:mergeDebugAssets UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestShaders UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugAndroidTestShaders NO-SOURCE
+> Task :core:dataBase:impl:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugShaders UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugShaders NO-SOURCE
+> Task :core:dataBase:impl:generateDebugAssets UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAssets UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestAssets UP-TO-DATE
+> Task :core:dataBase:impl:compressDebugAndroidTestAssets UP-TO-DATE
+> Task :core:dataBase:impl:desugarDebugAndroidTestFileDependencies UP-TO-DATE
+> Task :core:dataBase:impl:dexBuilderDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestGlobalSynthetics UP-TO-DATE
+> Task :core:dataBase:impl:processDebugAndroidTestJavaRes UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestJavaResource UP-TO-DATE
+> Task :core:dataBase:impl:checkDebugAndroidTestDuplicateClasses UP-TO-DATE
+> Task :core:dataBase:impl:mergeExtDexDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:impl:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :core:dataBase:api:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :core:dataBase:impl:mergeProjectDexDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:api:mergeDebugJniLibFolders UP-TO-DATE
+> Task :core:dataBase:impl:mergeLibDexDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:api:mergeDebugNativeLibs NO-SOURCE
+> Task :core:dataBase:api:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugJniLibFolders UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugNativeLibs NO-SOURCE
+> Task :core:dataBase:impl:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestJniLibFolders UP-TO-DATE
+> Task :core:dataBase:impl:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :core:dataBase:impl:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :core:dataBase:impl:validateSigningDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:impl:writeDebugAndroidTestSigningConfigVersions UP-TO-DATE
+> Task :core:dataBase:impl:packageDebugAndroidTest UP-TO-DATE
+> Task :core:dataBase:impl:createDebugAndroidTestApkListingFileRedirect UP-TO-DATE
+
+> Task :core:dataBase:impl:connectedDebugAndroidTest
+Starting 0 tests on New_Device(AVD) - 16
+
+Finished 0 tests on New_Device(AVD) - 16
+
+> Task :core:dataBase:impl:connectedDebugAndroidTest FAILED
+Test run failed to complete. Instrumentation run failed due to Process crashed.
+Logcat of last crash: 
+Process: com.mypersonalassistent.core.database.impl.test, PID: 6165
+java.lang.RuntimeException: Unable to instantiate instrumentation ComponentInfo{com.mypersonalassistent.core.database.impl.test/androidx.test.runner.AndroidJUnitRunner}: java.lang.ClassNotFoundException: Didn't find class "androidx.test.runner.AndroidJUnitRunner" on path: DexPathList[[zip file "/data/app/~~bxvL4i5lQFEPf3fB59F4vg==/com.mypersonalassistent.core.database.impl.test-VI7dU1UMNfTFRaWSCs7tiQ==/base.apk"],nativeLibraryDirectories=[/data/app/~~bxvL4i5lQFEPf3fB59F4vg==/com.mypersonalassistent.core.database.impl.test-VI7dU1UMNfTFRaWSCs7tiQ==/lib/x86_64, /system/lib64, /system_ext/lib64]]
+	at android.app.ActivityThread.initInstrumentation(ActivityThread.java:8086)
+	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:7754)
+	at android.app.ActivityThread.-$$Nest$mhandleBindApplication(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2546)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:248)
+	at android.os.Looper.loop(Looper.java:338)
+	at android.app.ActivityThread.main(ActivityThread.java:9067)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:593)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)
+Caused by: java.lang.ClassNotFoundException: Didn't find class "androidx.test.runner.AndroidJUnitRunner" on path: DexPathList[[zip file "/data/app/~~bxvL4i5lQFEPf3fB59F4vg==/com.mypersonalassistent.core.database.impl.test-VI7dU1UMNfTFRaWSCs7tiQ==/base.apk"],nativeLibraryDirectories=[/data/app/~~bxvL4i5lQFEPf3fB59F4vg==/com.mypersonalassistent.core.database.impl.test-VI7dU1UMNfTFRaWSCs7tiQ==/lib/x86_64, /system/lib64, /system_ext/lib64]]
+	at dalvik.system.BaseDexClassLoader.findClass(BaseDexClassLoader.java:259)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:637)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:573)
+	at android.app.ActivityThread.initInstrumentation(ActivityThread.java:8082)
+	... 10 more
+
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':core:credentials:impl:connectedDebugAndroidTest'.
+> There were failing tests. See the report at: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/build/reports/androidTests/connected/debug/index.html
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':core:dataBase:impl:connectedDebugAndroidTest'.
+> There were failing tests. See the report at: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/dataBase/impl/build/reports/androidTests/connected/debug/index.html
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 1m 27s
+348 actionable tasks: 14 executed, 334 up-to-date

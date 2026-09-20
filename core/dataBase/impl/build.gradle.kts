@@ -1,0 +1,4 @@
+plugins { id("com.android.library"); id("org.jetbrains.kotlin.android"); id("com.google.devtools.ksp") }
+android { namespace = "com.mypersonalassistent.core.database.impl"; compileSdk = 36; defaultConfig { minSdk = 26; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" } }
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+dependencies { implementation(project(":core:dataBase:api")); implementation("androidx.room:room-runtime:2.8.3"); implementation("androidx.room:room-ktx:2.8.3"); implementation("io.insert-koin:koin-core:4.0.2"); implementation("io.insert-koin:koin-android:4.0.2"); ksp("androidx.room:room-compiler:2.8.3"); androidTestImplementation("androidx.test:core:1.6.1"); androidTestImplementation("androidx.test.ext:junit:1.2.1"); androidTestImplementation("androidx.test:runner:1.6.2") }

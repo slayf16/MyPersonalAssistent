@@ -1,0 +1,250 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:credentials:api:preBuild UP-TO-DATE
+> Task :core:credentials:api:preDebugBuild UP-TO-DATE
+> Task :core:credentials:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:credentials:impl:preBuild UP-TO-DATE
+> Task :core:credentials:impl:preDebugBuild UP-TO-DATE
+> Task :core:credentials:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:dataBase:api:preBuild UP-TO-DATE
+> Task :core:dataBase:api:preDebugBuild UP-TO-DATE
+> Task :core:dataBase:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:dataBase:impl:preBuild UP-TO-DATE
+> Task :core:dataBase:impl:preDebugBuild UP-TO-DATE
+> Task :core:dataBase:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:history:api:preBuild UP-TO-DATE
+> Task :core:history:api:preDebugBuild UP-TO-DATE
+> Task :core:history:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:history:impl:preBuild UP-TO-DATE
+> Task :core:history:impl:preDebugBuild UP-TO-DATE
+> Task :core:history:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:llm:api:preBuild UP-TO-DATE
+> Task :core:llm:api:preDebugBuild UP-TO-DATE
+> Task :core:llm:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:llm:impl:preBuild UP-TO-DATE
+> Task :core:llm:impl:preDebugBuild UP-TO-DATE
+> Task :core:llm:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:chat:api:preBuild UP-TO-DATE
+> Task :feature:chat:api:preDebugBuild UP-TO-DATE
+> Task :feature:chat:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:chat:impl:preBuild UP-TO-DATE
+> Task :feature:chat:impl:preDebugBuild UP-TO-DATE
+> Task :feature:chat:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:credentials:api:preBuild UP-TO-DATE
+> Task :feature:credentials:api:preDebugBuild UP-TO-DATE
+> Task :feature:credentials:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:credentials:impl:preBuild UP-TO-DATE
+> Task :feature:credentials:impl:preDebugBuild UP-TO-DATE
+> Task :feature:credentials:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:home:api:preBuild UP-TO-DATE
+> Task :feature:home:api:preDebugBuild UP-TO-DATE
+> Task :feature:home:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:home:impl:preBuild UP-TO-DATE
+> Task :feature:home:impl:preDebugBuild UP-TO-DATE
+> Task :feature:home:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :core:credentials:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:credentials:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:dataBase:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:dataBase:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:history:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:history:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:llm:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:llm:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:chat:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:chat:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:credentials:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:credentials:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:home:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:home:impl:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:api:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:api:generateDebugResources UP-TO-DATE
+> Task :core:credentials:api:packageDebugResources UP-TO-DATE
+> Task :core:credentials:impl:generateDebugResValues UP-TO-DATE
+> Task :core:credentials:impl:generateDebugResources UP-TO-DATE
+> Task :core:credentials:impl:packageDebugResources UP-TO-DATE
+> Task :core:dataBase:api:generateDebugResValues UP-TO-DATE
+> Task :core:dataBase:api:generateDebugResources UP-TO-DATE
+> Task :core:dataBase:api:packageDebugResources UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugResValues UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugResources UP-TO-DATE
+> Task :core:dataBase:impl:packageDebugResources UP-TO-DATE
+> Task :core:history:api:generateDebugResValues UP-TO-DATE
+> Task :core:history:api:generateDebugResources UP-TO-DATE
+> Task :core:history:api:packageDebugResources UP-TO-DATE
+> Task :core:history:impl:generateDebugResValues UP-TO-DATE
+> Task :core:history:impl:generateDebugResources UP-TO-DATE
+> Task :core:history:impl:packageDebugResources UP-TO-DATE
+> Task :core:llm:api:generateDebugResValues UP-TO-DATE
+> Task :core:llm:api:generateDebugResources UP-TO-DATE
+> Task :core:llm:api:packageDebugResources UP-TO-DATE
+> Task :core:llm:impl:generateDebugResValues UP-TO-DATE
+> Task :core:llm:impl:generateDebugResources UP-TO-DATE
+> Task :core:llm:impl:packageDebugResources UP-TO-DATE
+> Task :feature:chat:api:generateDebugResValues UP-TO-DATE
+> Task :feature:chat:api:generateDebugResources UP-TO-DATE
+> Task :feature:chat:api:packageDebugResources UP-TO-DATE
+> Task :feature:chat:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:chat:impl:generateDebugResources UP-TO-DATE
+> Task :feature:chat:impl:packageDebugResources UP-TO-DATE
+> Task :feature:credentials:api:generateDebugResValues UP-TO-DATE
+> Task :feature:credentials:api:generateDebugResources UP-TO-DATE
+> Task :feature:credentials:api:packageDebugResources UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugResources UP-TO-DATE
+> Task :feature:credentials:impl:packageDebugResources UP-TO-DATE
+> Task :feature:home:api:generateDebugResValues UP-TO-DATE
+> Task :feature:home:api:generateDebugResources UP-TO-DATE
+> Task :feature:home:api:packageDebugResources UP-TO-DATE
+> Task :feature:home:impl:generateDebugResValues UP-TO-DATE
+> Task :feature:home:impl:generateDebugResources UP-TO-DATE
+> Task :feature:home:impl:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:api:processDebugManifest UP-TO-DATE
+> Task :core:credentials:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:credentials:impl:processDebugManifest UP-TO-DATE
+> Task :core:dataBase:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:dataBase:api:processDebugManifest UP-TO-DATE
+> Task :core:dataBase:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:dataBase:impl:processDebugManifest UP-TO-DATE
+> Task :core:history:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:history:api:processDebugManifest UP-TO-DATE
+> Task :core:history:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:history:impl:processDebugManifest UP-TO-DATE
+> Task :core:llm:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:llm:api:processDebugManifest UP-TO-DATE
+> Task :core:llm:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:llm:impl:processDebugManifest UP-TO-DATE
+> Task :feature:chat:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:chat:api:processDebugManifest UP-TO-DATE
+> Task :feature:chat:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:chat:impl:processDebugManifest UP-TO-DATE
+> Task :feature:credentials:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:credentials:api:processDebugManifest UP-TO-DATE
+> Task :feature:credentials:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:credentials:impl:processDebugManifest UP-TO-DATE
+> Task :feature:home:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:home:api:processDebugManifest UP-TO-DATE
+> Task :feature:home:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:home:impl:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :core:credentials:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:credentials:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:credentials:api:generateDebugRFile UP-TO-DATE
+> Task :core:credentials:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:credentials:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:credentials:impl:generateDebugRFile UP-TO-DATE
+> Task :core:dataBase:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:dataBase:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:dataBase:api:generateDebugRFile UP-TO-DATE
+> Task :core:dataBase:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:dataBase:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:dataBase:impl:generateDebugRFile UP-TO-DATE
+> Task :core:history:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:history:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:history:api:generateDebugRFile UP-TO-DATE
+> Task :core:history:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:history:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:history:impl:generateDebugRFile UP-TO-DATE
+> Task :core:llm:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:llm:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:llm:api:generateDebugRFile UP-TO-DATE
+> Task :core:llm:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:llm:impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:llm:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:chat:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:chat:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:chat:api:generateDebugRFile UP-TO-DATE
+> Task :feature:chat:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:chat:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:chat:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:credentials:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:credentials:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:credentials:api:generateDebugRFile UP-TO-DATE
+> Task :feature:credentials:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:credentials:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:credentials:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:home:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:home:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:home:api:generateDebugRFile UP-TO-DATE
+> Task :feature:home:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:home:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:home:impl:generateDebugRFile UP-TO-DATE
+> Task :core:credentials:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:credentials:api:compileDebugKotlin UP-TO-DATE
+> Task :core:credentials:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:credentials:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:credentials:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:credentials:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:credentials:impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:dataBase:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:dataBase:api:compileDebugKotlin UP-TO-DATE
+> Task :core:dataBase:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:dataBase:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:dataBase:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:dataBase:impl:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:processDebugResources
+
+> Task :core:credentials:impl:compileDebugKotlin FAILED
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/CredentialsModule.kt:3:17 Unresolved reference 'android'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/CredentialsModule.kt:5:92 Unresolved reference 'androidContext'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:14:8 Unresolved reference 'kotlinx'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:15:8 Unresolved reference 'kotlinx'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:20:50 Unresolved reference 'withContext'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:20:62 Unresolved reference 'Dispatchers'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:29:77 Unresolved reference 'withContext'.
+e: file:///C:/Users/AMK29/Desktop/mobile%20ai%20assistent/core/credentials/impl/src/main/java/com/mypersonalassistent/core/credentials/impl/SecureCredentialRepository.kt:29:89 Unresolved reference 'Dispatchers'.
+
+> Task :core:dataBase:impl:kspDebugKotlin
+e: [ksp] java.lang.IllegalStateException: unexpected jvm signature V
+
+> Task :core:dataBase:impl:kspDebugKotlin FAILED
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':core:credentials:impl:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':core:dataBase:impl:kspDebugKotlin'.
+> A failure occurred while executing com.google.devtools.ksp.gradle.KspAAWorkerAction
+   > unexpected jvm signature V
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 2m 25s
+164 actionable tasks: 3 executed, 161 up-to-date
