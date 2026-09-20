@@ -18,6 +18,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -51,12 +52,12 @@ class ChatUiTest {
         composeRule.setContent { ChatHost(fixture) }
 
         composeRule.messageField().performTextInput("Проверка ожидания")
-        composeRule.onNodeWithText("Отправить").performClick()
+        composeRule.onNodeWithContentDescription("Отправить").performClick()
 
         composeRule.onNodeWithText("Проверка ожидания").assertIsDisplayed()
         composeRule.onAllNodesWithContentDescription("Ассистент отвечает").assertCountEquals(1)
-        composeRule.onNodeWithText("Сообщение").assertIsNotEnabled()
-        composeRule.onNodeWithText("Отправить").assertIsNotEnabled()
+        composeRule.messageField().assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Отправить").assertIsNotEnabled()
         composeRule.runOnIdle {
             assertEquals(1, fixture.sendCount)
             assertEquals(1, fixture.state.value.messages.count { it.role == MessageRole.USER })
@@ -70,11 +71,11 @@ class ChatUiTest {
         composeRule.setContent { ChatHost(fixture) }
 
         composeRule.messageField().performTextInput(rawDraft)
-        composeRule.onNodeWithText("Отправить").performClick()
+        composeRule.onNodeWithContentDescription("Отправить").performClick()
         composeRule.runOnIdle { fixture.failActiveRequest() }
 
         composeRule.onNode(hasSetTextAction() and hasText(rawDraft)).assertIsDisplayed().assertIsEnabled()
-        composeRule.onNodeWithText("Отправить").assertIsEnabled()
+        composeRule.onNodeWithContentDescription("Отправить").assertIsEnabled()
         composeRule.onAllNodesWithContentDescription("Ассистент отвечает").assertCountEquals(0)
         composeRule.onAllNodesWithText("Техническая ошибка").assertCountEquals(1)
         composeRule.runOnIdle {
@@ -106,7 +107,7 @@ class ChatUiTest {
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.messageField() =
-        onNode(hasSetTextAction())
+        onNodeWithContentDescription("Поле сообщения")
 
     @Composable
     private fun ChatHost(fixture: ChatFixture) {
