@@ -1,0 +1,3 @@
+plugins { id("com.android.library"); id("org.jetbrains.kotlin.android") }
+android { namespace = "com.mypersonalassistent.core.credentials.impl"; compileSdk = 36; defaultConfig { minSdk = 26; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" } }
+dependencies { implementation(project(":core:credentials:api")); implementation("io.insert-koin:koin-core:4.0.2"); implementation("io.insert-koin:koin-android:4.0.2"); implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"); androidTestImplementation("androidx.test:core:1.6.1"); androidTestImplementation("androidx.test.ext:junit:1.2.1"); androidTestImplementation("androidx.test:runner:1.6.2") }
