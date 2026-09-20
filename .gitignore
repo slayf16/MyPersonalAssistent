@@ -11,3 +11,6 @@ local.properties
 *.keystore
 secrets.properties
 .DS_Store
+
+# Local agent task state
+/tasks/
