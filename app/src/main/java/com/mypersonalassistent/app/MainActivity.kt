@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -23,6 +22,7 @@ import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.impl.ChatScreen
 import com.mypersonalassistent.feature.credentials.impl.CredentialsScreen
 import com.mypersonalassistent.feature.home.impl.HomeScreen
+import com.mypersonalassistent.app.ui.theme.MyPersonalAssistentTheme
 import com.mypersonalassistent.core.credentials.impl.credentialsModule
 import com.mypersonalassistent.core.database.impl.databaseModule
 import com.mypersonalassistent.core.history.impl.historyModule
@@ -46,7 +46,13 @@ class MainActivity : ComponentActivity() {
         val history = org.koin.java.KoinJavaComponent.get<HistoryRepository>(HistoryRepository::class.java)
         val llm = org.koin.java.KoinJavaComponent.get<Llm>(Llm::class.java)
         val root = DefaultRootComponent(defaultComponentContext(), credentials, history, llm)
-        setContent { MaterialTheme { Surface { RootContent(root) } } }
+        setContent {
+            MyPersonalAssistentTheme {
+                Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
+                    RootContent(root)
+                }
+            }
+        }
     }
 }
 @Composable

@@ -9,13 +9,16 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -32,10 +35,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,11 +51,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.MessageRole
@@ -97,9 +103,11 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Чат") },
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 navigationIcon = {
                     IconButton(
                         onClick = { accept(ChatIntent.RequestExit) },
@@ -146,9 +154,9 @@ private fun MessageList(
         state = listState,
         contentPadding = PaddingValues(
             start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 12.dp,
+            top = contentPadding.calculateTopPadding(),
             end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 12.dp,
+            bottom = contentPadding.calculateBottomPadding(),
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -164,28 +172,50 @@ private fun MessageList(
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val isUser = message.role == MessageRole.USER
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            modifier = Modifier.widthIn(max = 320.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSecondaryContainer,
-            shape = RoundedCornerShape(
-                topStart = 18.dp,
-                topEnd = 18.dp,
-                bottomStart = if (isUser) 18.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 18.dp,
-            ),
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val bubbleMaxWidth = maxWidth * 0.82f
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                text = message.content,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            if (!isUser) {
+                AssistantMarker()
+                Spacer(Modifier.size(8.dp))
+            }
+            Surface(
+                modifier = Modifier.widthIn(max = bubbleMaxWidth),
+                color = if (isUser) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = RoundedCornerShape(
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomStart = if (isUser) 18.dp else 4.dp,
+                    bottomEnd = if (isUser) 4.dp else 18.dp,
+                ),
+            ) {
+                Text(
+                    text = message.content,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantMarker() {
+    Surface(
+        modifier = Modifier.size(24.dp),
+        color = MaterialTheme.colorScheme.secondary,
+        contentColor = MaterialTheme.colorScheme.onSecondary,
+        shape = CircleShape,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text("AI", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -208,17 +238,23 @@ private fun AssistantTypingBubble() {
         else -> "..."
     }
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.Top,
+    ) {
+        AssistantMarker()
+        Spacer(Modifier.size(8.dp))
         Surface(
             modifier = Modifier.semantics { contentDescription = "Ассистент отвечает" },
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
         ) {
             Text(
                 text = dots,
                 modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
                     .clearAndSetSemantics { },
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -228,22 +264,32 @@ private fun AssistantTypingBubble() {
 
 @Composable
 private fun ChatInput(state: ChatState, enabled: Boolean, accept: (ChatIntent) -> Unit) {
-    Surface(tonalElevation = 3.dp) {
+    Surface(tonalElevation = 2.dp, shadowElevation = 2.dp) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
-                .navigationBarsPadding()
-                .padding(12.dp),
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(
+            TextField(
                 value = state.draft,
                 onValueChange = { accept(ChatIntent.ChangeDraft(it)) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = "Поле сообщения" },
                 enabled = enabled,
-                label = { Text("Сообщение") },
+                placeholder = { Text("Сообщение") },
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
                 minLines = 1,
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -254,8 +300,17 @@ private fun ChatInput(state: ChatState, enabled: Boolean, accept: (ChatIntent) -
             Button(
                 onClick = { accept(ChatIntent.Send) },
                 enabled = enabled && state.draft.isNotBlank(),
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = "Отправить" },
+                shape = CircleShape,
+                contentPadding = PaddingValues(0.dp),
             ) {
-                Text("Отправить")
+                Text(
+                    text = "↑",
+                    modifier = Modifier.clearAndSetSemantics { },
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
         }
     }

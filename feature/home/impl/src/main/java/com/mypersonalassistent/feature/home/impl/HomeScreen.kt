@@ -8,13 +8,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,9 +34,20 @@ import kotlinx.coroutines.flow.StateFlow
 
 @Composable fun HomeScreen(stateFlow: StateFlow<HomeState>, accept: (HomeIntent) -> Unit) {
     val state by stateFlow.collectAsState()
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { accept(HomeIntent.EditKey) }) { Text("Сменить ключ") }
+    Column(Modifier.fillMaxSize().padding(horizontal = ScreenHorizontalPadding)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Мои чаты",
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = { accept(HomeIntent.EditKey) },
+                modifier = Modifier.semantics { contentDescription = "Сменить ключ" },
+            ) { Text("Сменить ключ") }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
@@ -45,19 +59,48 @@ import kotlinx.coroutines.flow.StateFlow
                     Text("Не удалось загрузить чаты.")
                     TextButton(onClick = { accept(HomeIntent.Retry) }) { Text("Повторить") }
                 }
-                state.chats.isEmpty() -> Text("Можете начать создавать своего ассистента.", Modifier.align(Alignment.Center))
-                else -> LazyColumn(Modifier.fillMaxSize().padding(bottom = 80.dp)) {
+                state.chats.isEmpty() -> EmptyChatsContent(Modifier.align(Alignment.Center))
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(bottom = 80.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     items(state.chats, key = { it.id }) { chat ->
-                        ListItem(
-                            headlineContent = { Text(chat.title) },
-                            modifier = Modifier.clickable { accept(HomeIntent.Open(chat.id)) }
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { accept(HomeIntent.Open(chat.id)) }
                                 .semantics { contentDescription = "Открыть чат ${chat.title}" }
-                                .padding(horizontal = 8.dp),
-                        )
+                        ) {
+                            Text(
+                                text = chat.title,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
                     }
                 }
             }
-            ExtendedFloatingActionButton(onClick = { accept(HomeIntent.NewChat) }, icon = { androidx.compose.material3.Icon(Icons.Default.Add, null) }, text = { Text("Создать чат") }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).semantics { contentDescription = "Создать чат" })
+            FloatingActionButton(
+                onClick = { accept(HomeIntent.NewChat) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .semantics { contentDescription = "Создать чат" },
+            ) { androidx.compose.material3.Icon(Icons.Default.Add, contentDescription = null) }
         }
     }
 }
+
+@Composable
+private fun EmptyChatsContent(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Начните диалог", style = MaterialTheme.typography.titleLarge)
+            Text("Можете начать создавать своего ассистента.")
+        }
+    }
+}
+
+private val ScreenHorizontalPadding = 16.dp
