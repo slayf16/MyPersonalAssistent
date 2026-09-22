@@ -6,6 +6,10 @@
 
 Запуск сабагента: `model="gpt-5.6-terra"`, `reasoning_effort="high"`,
 `fork_turns="none"`. Не наследовать модель родителя. Контекст передаётся явно.
+До начала работы root обязан зарегистрировать реальное назначение через `dispatch`
+для ANDROID_DEVELOPER; по завершении root регистрирует `complete-stage` только для
+твоего фактического PASS-артефакта. Не подменяй root и не создавай provenance за
+другого agent ID.
 Для этапа CODE_REVIEW запускается отдельная роль из `code-reviewer.md` на Sol medium.
 
 - Проектируй небольшие api-контракты; собирай реализации через Koin в composition root.

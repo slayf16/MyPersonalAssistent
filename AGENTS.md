@@ -49,6 +49,28 @@ CODE_REVIEW → TESTING → DONE. Правила переходов в `docs/WOR
 Принятие проблем не превращает FAIL/BLOCKED в PASS: используй ACCEPTED_WITH_ISSUES.
 Изменения требований возвращают задачу в ANALYSIS; дефекты — в CODING в пределах лимита.
 
+## Обязательная orchestration provenance
+
+Root — только координатор: он создаёт задачу, запускает/ждёт/читает subagent,
+регистрирует evidence и выполняет state transitions. Root не выполняет содержательные
+этапы ANALYSIS..TESTING, не пишет production code, тесты или stage reports. Каждый
+содержательный этап начинает назначенный subagent только после фактической команды
+`dispatch`; затем root регистрирует `complete-stage` по его завершённому PASS-артефакту.
+Один текст `Outcome: PASS` не разрешает переход без свежего stage/cycle/plan/report
+evidence. Исключение для legacy — только структурная миграция без выдуманных записей;
+следующий переход всё равно требует нового evidence.
+
+`task.ps1` — fail-closed consistency/audit guard, а не authentication boundary:
+AgentId/model/reasoning передаются как self-reported данные, а общий доступ на запись
+к скрипту или state позволяет намеренную подделку. Не заявляй криптографическое
+доказательство identity, модели или построчного авторства.
+
+AgentId принимается только в canonical форме `/root/<lowercase_id>(/<lowercase_id>)*`.
+`root`, `/root`, завершающий slash, `.`/`..`, пробелы и иной alias отклоняются;
+сравнение coder/reviewer выполняется только для этой формы. Reviewer отличается
+от каждого завершившего CODING автора с текущим plan hash, включая invalidated
+rollback records: их код мог остаться в рабочем дереве.
+
 ## Модели сабагентов
 
 При запуске сабагента явно задавай модель и уровень рассуждений; наследование
@@ -66,7 +88,10 @@ CODE_REVIEW → TESTING → DONE. Правила переходов в `docs/WOR
 Полный fork наследует модель, поэтому для этих ролей не подходит.
 При другом механизме запуска укажи эквивалентные параметры явно.
 Если требуемая модель недоступна, сообщи об этом; не подменяй её молча.
-Эти правила определяют параметры запуска, но сами не запускают сабагентов.
+Root обязан перед запуском содержательной работы зарегистрировать фактическое
+назначение через `./scripts/task.ps1 -Action dispatch` с stage, role, AgentId,
+model, reasoning и bounded scope. После PASS-артефакта он вызывает
+`complete-stage -DispatchId <id>`; `validate` показывает missing/stale evidence.
 Кодер и код-ревьюер — разные роли: проверка кода использует Sol medium.
 
 ## Code Review Rules

@@ -28,8 +28,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.arkivanov.decompose:decompose:3.3.0")
     implementation("com.arkivanov.decompose:extensions-compose:3.3.0")
-    implementation(project(":core:credentials:impl")); implementation(project(":core:dataBase:impl")); implementation(project(":core:history:impl")); implementation(project(":core:llm:impl"))
-    implementation(project(":feature:credentials:impl")); implementation(project(":feature:home:impl")); implementation(project(":feature:chat:impl"))
-    implementation(project(":feature:credentials:api")); implementation(project(":feature:home:api")); implementation(project(":feature:chat:api"))
-    implementation(project(":core:credentials:api")); implementation(project(":core:history:api")); implementation(project(":core:llm:api"))
+    implementation(project(":core:credentials:impl")); implementation(project(":core:dataBase:impl")); implementation(project(":core:history:impl")); implementation(project(":core:llm:impl")); implementation(project(":core:memory:impl")); implementation(project(":core:agent:impl"))
+    implementation(project(":feature:credentials:impl")); implementation(project(":feature:home:impl")); implementation(project(":feature:chat:impl")); implementation(project(":feature:profile:impl"))
+    implementation(project(":feature:credentials:api")); implementation(project(":feature:home:api")); implementation(project(":feature:chat:api")); implementation(project(":feature:profile:api"))
+    implementation(project(":core:credentials:api")); implementation(project(":core:history:api")); implementation(project(":core:llm:api")); implementation(project(":core:memory:api")); implementation(project(":core:agent:api"))
 }

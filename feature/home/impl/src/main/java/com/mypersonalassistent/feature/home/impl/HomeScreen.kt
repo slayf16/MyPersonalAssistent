@@ -45,6 +45,10 @@ import kotlinx.coroutines.flow.StateFlow
             )
             Spacer(Modifier.weight(1f))
             TextButton(
+                onClick = { accept(HomeIntent.EditProfile) },
+                modifier = Modifier.semantics { contentDescription = "Изменить профиль" },
+            ) { Text("Профиль") }
+            TextButton(
                 onClick = { accept(HomeIntent.EditKey) },
                 modifier = Modifier.semantics { contentDescription = "Сменить ключ" },
             ) { Text("Сменить ключ") }

@@ -4,11 +4,13 @@ import com.mypersonalassistent.core.database.api.ChatStorage
 import com.mypersonalassistent.core.database.api.StorageResult
 import com.mypersonalassistent.core.database.api.StoredChat
 import com.mypersonalassistent.core.database.api.StoredChatSummary
+import com.mypersonalassistent.core.database.api.StoredTaskMemory
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.DeliveryState
 import com.mypersonalassistent.core.history.api.HistoryCorruptionException
 import com.mypersonalassistent.core.history.api.MessageRole
+import com.mypersonalassistent.core.memory.api.TaskMemory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
@@ -34,10 +36,20 @@ class RoomHistoryRepositoryTest {
             assertNull(storage.last)
         }
     }
+    @Test fun chatAndTaskMemoryUseOneBundleWrite() = runBlocking {
+        val storage = FakeStorage(); val repository = RoomHistoryRepository(storage)
+        val snapshot = ChatSnapshot("id", "title", 1, 2, emptyList())
+        val task = TaskMemory("id", "goal", listOf("one"), "done", listOf("decision"), 2)
+        assertEquals(true, repository.save(snapshot, task))
+        assertEquals("goal", storage.lastTask?.goal)
+        assertEquals("[\"one\"]", storage.lastTask?.constraintsJson)
+        assertEquals("[\"decision\"]", storage.lastTask?.decisionsJson)
+    }
     private class FakeStorage(initial: StoredChat? = null) : ChatStorage {
-        var value = initial; var last: StoredChat? = null
+        var value = initial; var last: StoredChat? = null; var lastTask: StoredTaskMemory? = null
         override fun observeSummaries(): Flow<List<StoredChatSummary>> = emptyFlow()
         override suspend fun read(id: String): StoredChat? = value
         override suspend fun upsert(chat: StoredChat): StorageResult { last = chat; value = chat; return StorageResult.Success }
+        override suspend fun upsertWithTaskMemory(chat: StoredChat, taskMemory: StoredTaskMemory?): StorageResult { lastTask = taskMemory; return upsert(chat) }
     }
 }

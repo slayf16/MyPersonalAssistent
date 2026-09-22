@@ -18,15 +18,21 @@ import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.mypersonalassistent.core.credentials.api.CredentialRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.llm.api.Llm
+import com.mypersonalassistent.core.memory.api.MemoryRepository
+import com.mypersonalassistent.core.agent.api.AgentRequestComposer
 import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.impl.ChatScreen
 import com.mypersonalassistent.feature.credentials.impl.CredentialsScreen
 import com.mypersonalassistent.feature.home.impl.HomeScreen
+import com.mypersonalassistent.feature.profile.api.ProfileEffect
+import com.mypersonalassistent.feature.profile.impl.ProfileScreen
 import com.mypersonalassistent.app.ui.theme.MyPersonalAssistentTheme
 import com.mypersonalassistent.core.credentials.impl.credentialsModule
 import com.mypersonalassistent.core.database.impl.databaseModule
 import com.mypersonalassistent.core.history.impl.historyModule
 import com.mypersonalassistent.core.llm.impl.llmModule
+import com.mypersonalassistent.core.memory.impl.memoryModule
+import com.mypersonalassistent.core.agent.impl.agentModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
 
@@ -35,7 +41,7 @@ class MyPersonalAssistentApplication : android.app.Application() {
         super.onCreate()
         startKoin {
             androidContext(this@MyPersonalAssistentApplication)
-            modules(credentialsModule, databaseModule, historyModule, llmModule)
+            modules(credentialsModule, databaseModule, historyModule, memoryModule, agentModule, llmModule)
         }
     }
 }
@@ -44,8 +50,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val credentials = org.koin.java.KoinJavaComponent.get<CredentialRepository>(CredentialRepository::class.java)
         val history = org.koin.java.KoinJavaComponent.get<HistoryRepository>(HistoryRepository::class.java)
+        val memory = org.koin.java.KoinJavaComponent.get<MemoryRepository>(MemoryRepository::class.java)
+        val composer = org.koin.java.KoinJavaComponent.get<AgentRequestComposer>(AgentRequestComposer::class.java)
         val llm = org.koin.java.KoinJavaComponent.get<Llm>(Llm::class.java)
-        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, llm)
+        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, memory, composer, llm)
         setContent {
             MyPersonalAssistentTheme {
                 Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
@@ -82,12 +90,25 @@ private fun RootContent(root: RootComponent) {
                                 when (effect) {
                                     com.mypersonalassistent.feature.home.api.HomeEffect.NewChat -> page.component.onNew()
                                     com.mypersonalassistent.feature.home.api.HomeEffect.EditKey -> page.component.onEditKey()
+                                    com.mypersonalassistent.feature.home.api.HomeEffect.EditProfile -> page.component.onEditProfile()
                                     is com.mypersonalassistent.feature.home.api.HomeEffect.Open -> page.component.onOpen(effect.id)
                                     com.mypersonalassistent.feature.home.api.HomeEffect.TechnicalError -> snackbar.showSnackbar("Техническая ошибка")
                                 }
                             }
                         }
                         HomeScreen(feature.state, feature::accept)
+                    }
+                    is RootComponent.Child.Profile -> {
+                        val feature = page.component.feature
+                        LaunchedEffect(feature) {
+                            for (effect in feature.effects) {
+                                when (effect) {
+                                    ProfileEffect.Done -> page.component.onDone()
+                                    ProfileEffect.TechnicalError -> snackbar.showSnackbar("Техническая ошибка")
+                                }
+                            }
+                        }
+                        ProfileScreen(feature.state, feature::accept)
                     }
                     is RootComponent.Child.Chat -> {
                         val feature = page.component.feature
