@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,8 +27,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -70,10 +75,10 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
     val state by stateFlow.collectAsState()
 
     BackHandler {
-        if (state.saveDialog) {
-            accept(ChatIntent.CloseDialog)
-        } else if (!state.saving) {
-            accept(ChatIntent.RequestExit)
+        when {
+            state.taskEditorOpen -> accept(ChatIntent.CloseTaskEditor)
+            state.saveDialog -> accept(ChatIntent.CloseDialog)
+            !state.saving -> accept(ChatIntent.RequestExit)
         }
     }
 
@@ -81,6 +86,9 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
 
     if (state.saveDialog) {
         SaveChatDialog(state = state, accept = accept)
+    }
+    if (state.taskEditorOpen) {
+        TaskMemoryDialog(state = state, accept = accept)
     }
 }
 
@@ -117,6 +125,14 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
                         )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { accept(ChatIntent.OpenTaskEditor) },
+                        enabled = !state.loading && !state.loadFailed && !state.saving,
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "Контекст задачи")
                     }
                 },
             )
@@ -357,6 +373,74 @@ private fun SaveChatDialog(state: ChatState, accept: (ChatIntent) -> Unit) {
                 enabled = !state.saving,
             ) { Text("Нет") }
         },
+    )
+}
+
+@Composable
+private fun TaskMemoryDialog(state: ChatState, accept: (ChatIntent) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { accept(ChatIntent.CloseTaskEditor) },
+        title = { Text("Контекст задачи") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    "Этот контекст относится только к текущему чату и помогает ассистенту держать фокус.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTaskField(
+                    value = state.taskDraft.goal,
+                    onValueChange = { accept(ChatIntent.ChangeTaskGoal(it)) },
+                    label = "Цель",
+                    placeholder = "Что нужно получить?",
+                )
+                OutlinedTaskField(
+                    value = state.taskDraft.constraints,
+                    onValueChange = { accept(ChatIntent.ChangeTaskConstraints(it)) },
+                    label = "Ограничения",
+                    placeholder = "Одно ограничение на строку",
+                )
+                OutlinedTaskField(
+                    value = state.taskDraft.desiredResult,
+                    onValueChange = { accept(ChatIntent.ChangeTaskResult(it)) },
+                    label = "Ожидаемый результат",
+                    placeholder = "Как поймём, что задача готова?",
+                )
+                OutlinedTaskField(
+                    value = state.taskDraft.decisions,
+                    onValueChange = { accept(ChatIntent.ChangeTaskDecisions(it)) },
+                    label = "Принятые решения",
+                    placeholder = "Одно решение на строку",
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { accept(ChatIntent.ApplyTaskMemory) }) { Text("Применить") }
+        },
+        dismissButton = {
+            TextButton(onClick = { accept(ChatIntent.CloseTaskEditor) }) { Text("Отмена") }
+        },
+    )
+}
+
+@Composable
+private fun OutlinedTaskField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+) {
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+        label = { Text(label) },
+        placeholder = { Text(placeholder) },
+        minLines = 2,
+        maxLines = 4,
     )
 }
 

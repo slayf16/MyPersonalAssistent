@@ -137,6 +137,13 @@ class ChatUiTest {
                 ChatIntent.Send -> beginFakeRequest()
                 ChatIntent.RequestExit -> state.update { it.copy(saveDialog = true) }
                 ChatIntent.CloseDialog -> state.update { it.copy(saveDialog = false) }
+                ChatIntent.OpenTaskEditor -> state.update { it.copy(taskEditorOpen = true) }
+                ChatIntent.CloseTaskEditor -> state.update { it.copy(taskEditorOpen = false) }
+                is ChatIntent.ChangeTaskGoal -> state.update { it.copy(taskDraft = it.taskDraft.copy(goal = intent.value)) }
+                is ChatIntent.ChangeTaskConstraints -> state.update { it.copy(taskDraft = it.taskDraft.copy(constraints = intent.value)) }
+                is ChatIntent.ChangeTaskResult -> state.update { it.copy(taskDraft = it.taskDraft.copy(desiredResult = intent.value)) }
+                is ChatIntent.ChangeTaskDecisions -> state.update { it.copy(taskDraft = it.taskDraft.copy(decisions = intent.value)) }
+                ChatIntent.ApplyTaskMemory -> state.update { it.copy(taskEditorOpen = false) }
                 ChatIntent.ConfirmSave, ChatIntent.Discard, ChatIntent.Load -> Unit
             }
         }

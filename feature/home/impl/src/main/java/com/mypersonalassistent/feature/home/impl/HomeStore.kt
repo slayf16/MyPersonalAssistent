@@ -40,6 +40,7 @@ internal class HomeStoreFactory(
                 HomeIntent.Retry -> observe()
                 HomeIntent.NewChat -> publish(HomeEffect.NewChat)
                 HomeIntent.EditKey -> publish(HomeEffect.EditKey)
+                HomeIntent.EditProfile -> publish(HomeEffect.EditProfile)
                 is HomeIntent.Open -> publish(HomeEffect.Open(intent.id))
             }
         }

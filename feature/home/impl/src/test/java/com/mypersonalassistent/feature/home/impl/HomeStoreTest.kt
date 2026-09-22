@@ -4,6 +4,7 @@ import com.arkivanov.mvikotlin.main.store.DefaultStoreFactory
 import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.ChatSummary
 import com.mypersonalassistent.core.history.api.HistoryRepository
+import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.feature.home.api.HomeIntent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -73,6 +74,7 @@ class HomeStoreTest {
 
         override suspend fun read(id: String): ChatSnapshot? = null
         override suspend fun save(snapshot: ChatSnapshot): Boolean = true
+        override suspend fun save(snapshot: ChatSnapshot, taskMemory: TaskMemory): Boolean = true
     }
 
     private class CancellableHistory : HistoryRepository {
@@ -84,5 +86,6 @@ class HomeStoreTest {
 
         override suspend fun read(id: String): ChatSnapshot? = null
         override suspend fun save(snapshot: ChatSnapshot): Boolean = true
+        override suspend fun save(snapshot: ChatSnapshot, taskMemory: TaskMemory): Boolean = true
     }
 }

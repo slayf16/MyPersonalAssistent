@@ -1,6 +1,6 @@
 package com.mypersonalassistent.core.llm.api
 
-enum class LlmRole { USER, ASSISTANT }
+enum class LlmRole { SYSTEM, USER, ASSISTANT }
 data class LlmMessage(val role: LlmRole, val text: String)
 data class LlmRequest(val messages: List<LlmMessage>)
 interface Llm { suspend fun execute(request: LlmRequest): LlmResult }
