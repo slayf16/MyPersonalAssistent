@@ -68,6 +68,7 @@ import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.MessageRole
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import com.mypersonalassistent.feature.chat.api.ChatState
+import com.mypersonalassistent.feature.chat.api.AgentPrimaryAction
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -87,6 +88,9 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
     if (state.saveDialog) {
         SaveChatDialog(state = state, accept = accept)
     }
+    if (state.recoveryChoiceRequired) {
+        RecoveryChoiceDialog(accept = accept)
+    }
     if (state.taskEditorOpen) {
         TaskMemoryDialog(state = state, accept = accept)
     }
@@ -97,7 +101,7 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
 private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
     val listState = rememberLazyListState()
     var followLatest by remember { mutableStateOf(true) }
-    val canEdit = !state.loading && !state.loadFailed && !state.sending && !state.saving
+    val canEdit = state.composerEditable
 
     LaunchedEffect(listState) {
         snapshotFlow { listState.isAtBottom() }
@@ -114,7 +118,13 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text("Чат") },
+                title = {
+                    Column {
+                        Text(state.agentUi.phaseLabel)
+                        if (state.agentUi.stepLabel.isNotBlank()) Text(state.agentUi.stepLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        Text(state.agentUi.expectedAction, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.semantics { contentDescription = "Ожидаемое действие: ${state.agentUi.expectedAction}" })
+                    }
+                },
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 navigationIcon = {
                     IconButton(
@@ -128,9 +138,16 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                     }
                 },
                 actions = {
+                    when (state.agentUi.primaryAction) {
+                        AgentPrimaryAction.PAUSE -> TextButton(onClick = { accept(ChatIntent.Pause) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Пауза") }
+                        AgentPrimaryAction.RESUME -> TextButton(onClick = { accept(ChatIntent.Resume) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Продолжить") }
+                        AgentPrimaryAction.RETRY -> TextButton(onClick = { accept(ChatIntent.Retry) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Повторить") }
+                        AgentPrimaryAction.START_NEW_TASK -> TextButton(onClick = { accept(ChatIntent.StartNewTask) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Новая") }
+                        AgentPrimaryAction.NONE -> Unit
+                    }
                     IconButton(
                         onClick = { accept(ChatIntent.OpenTaskEditor) },
-                        enabled = !state.loading && !state.loadFailed && !state.saving,
+                        enabled = !state.loading && !state.loadFailed && !state.saving && state.taskMemoryEditable,
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = "Контекст задачи")
                     }
@@ -354,6 +371,21 @@ private fun LoadFailedContent(contentPadding: PaddingValues) {
     ) {
         Text("Не удалось загрузить чат")
     }
+}
+
+@Composable
+private fun RecoveryChoiceDialog(accept: (ChatIntent) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Незавершённая задача") },
+        text = { Text("Для этого сохранённого чата есть локальный черновик восстановления.") },
+        confirmButton = {
+            Button(onClick = { accept(ChatIntent.ContinueRecovery) }) { Text("Продолжить") }
+        },
+        dismissButton = {
+            TextButton(onClick = { accept(ChatIntent.DiscardRecovery) }) { Text("Отбросить") }
+        },
+    )
 }
 
 @Composable

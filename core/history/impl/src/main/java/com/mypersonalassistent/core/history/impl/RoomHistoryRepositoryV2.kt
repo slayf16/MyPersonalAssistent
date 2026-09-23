@@ -1,15 +1,20 @@
 package com.mypersonalassistent.core.history.impl
 
 import com.mypersonalassistent.core.database.api.ChatStorage
+import com.mypersonalassistent.core.database.api.AgentStorage
 import com.mypersonalassistent.core.database.api.StorageResult
 import com.mypersonalassistent.core.database.api.StoredChat
 import com.mypersonalassistent.core.database.api.StoredTaskMemory
+import com.mypersonalassistent.core.database.api.StoredAgentRecovery
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.ChatSummary
 import com.mypersonalassistent.core.history.api.DeliveryState
 import com.mypersonalassistent.core.history.api.HistoryCorruptionException
 import com.mypersonalassistent.core.history.api.HistoryRepository
+import com.mypersonalassistent.core.history.api.AgentRecovery
+import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
+import com.mypersonalassistent.core.history.api.AgentRecoverySummary
 import com.mypersonalassistent.core.history.api.MessageRole
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import kotlinx.coroutines.CoroutineDispatcher
@@ -22,9 +27,10 @@ import kotlinx.serialization.json.Json
 
 class RoomHistoryRepository(
     private val storage: ChatStorage,
+    private val agentStorage: AgentStorage,
     private val json: Json = Json { ignoreUnknownKeys = false },
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : HistoryRepository {
+) : HistoryRepository, AgentRecoveryRepository {
     override fun observeSummaries(): Flow<List<ChatSummary>> = storage.observeSummaries().map { rows ->
         rows.map { ChatSummary(it.id, it.title, it.updatedAt) }
     }
@@ -53,6 +59,31 @@ class RoomHistoryRepository(
         ) is StorageResult.Success
     }
 
+    override fun observeRecovery(): Flow<List<AgentRecoverySummary>> =
+        agentStorage.observeRecoverySummaries().map { rows ->
+            rows.map { AgentRecoverySummary(it.chatId, it.isCanonicalChat, it.updatedAt) }
+        }
+
+    override suspend fun readCheckpoint(chatId: String): String? = withContext(dispatcher) {
+        agentStorage.readAgentCheckpoint(chatId)?.checkpointJson
+    }
+
+    override suspend fun readRecovery(chatId: String): AgentRecovery? = withContext(dispatcher) {
+        agentStorage.readAgentRecovery(chatId)?.toRecovery()
+    }
+
+    override suspend fun writeRecovery(recovery: AgentRecovery): Boolean = withContext(dispatcher) {
+        agentStorage.writeAgentRecovery(recovery.toStored()) is StorageResult.Success
+    }
+
+    override suspend fun promoteRecovery(recovery: AgentRecovery): Boolean = withContext(dispatcher) {
+        agentStorage.promoteAgentRecovery(recovery.toStored()) is StorageResult.Success
+    }
+
+    override suspend fun discardRecovery(chatId: String): Boolean = withContext(dispatcher) {
+        agentStorage.discardAgentRecovery(chatId) is StorageResult.Success
+    }
+
     private fun ChatSnapshot.toStored() = StoredChat(
         id,
         title,
@@ -60,6 +91,42 @@ class RoomHistoryRepository(
         updatedAt,
         json.encodeToString(PersistedContext.from(this)),
     )
+
+    private fun AgentRecovery.toStored() = StoredAgentRecovery(
+        chatId = snapshot.id,
+        isCanonicalChat = isCanonicalChat,
+        title = snapshot.title,
+        createdAt = snapshot.createdAt,
+        chatUpdatedAt = snapshot.updatedAt,
+        contextJson = json.encodeToString(PersistedContext.from(snapshot)),
+        taskGoal = taskMemory.goal.trim(),
+        taskConstraintsJson = json.encodeToString(taskMemory.constraints.map(String::trim).filter(String::isNotEmpty)),
+        taskDesiredResult = taskMemory.desiredResult.trim(),
+        taskDecisionsJson = json.encodeToString(taskMemory.decisions.map(String::trim).filter(String::isNotEmpty)),
+        taskUpdatedAt = taskMemory.updatedAt,
+        checkpointJson = checkpointJson,
+        updatedAt = updatedAt,
+    )
+
+    private fun StoredAgentRecovery.toRecovery(): AgentRecovery = try {
+        val stored = StoredChat(chatId, title, createdAt, chatUpdatedAt, contextJson)
+        AgentRecovery(
+            snapshot = decode(stored),
+            taskMemory = TaskMemory(
+                chatId = chatId,
+                goal = taskGoal,
+                constraints = json.decodeFromString(taskConstraintsJson),
+                desiredResult = taskDesiredResult,
+                decisions = json.decodeFromString(taskDecisionsJson),
+                updatedAt = taskUpdatedAt,
+            ),
+            checkpointJson = checkpointJson,
+            isCanonicalChat = isCanonicalChat,
+            updatedAt = updatedAt,
+        )
+    } catch (_: Throwable) {
+        throw HistoryCorruptionException()
+    }
 
     private fun decode(stored: StoredChat): ChatSnapshot = try {
         json.decodeFromString<PersistedContext>(stored.contextJson).toSnapshot(stored)

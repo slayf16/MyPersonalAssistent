@@ -16,12 +16,16 @@ import androidx.room.migration.Migration
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mypersonalassistent.core.database.api.ChatStorage
+import com.mypersonalassistent.core.database.api.AgentStorage
 import com.mypersonalassistent.core.database.api.MemoryStorage
 import com.mypersonalassistent.core.database.api.StorageResult
 import com.mypersonalassistent.core.database.api.StoredChat
 import com.mypersonalassistent.core.database.api.StoredChatSummary
 import com.mypersonalassistent.core.database.api.StoredProfile
 import com.mypersonalassistent.core.database.api.StoredTaskMemory
+import com.mypersonalassistent.core.database.api.StoredAgentCheckpoint
+import com.mypersonalassistent.core.database.api.StoredAgentRecovery
+import com.mypersonalassistent.core.database.api.StoredRecoverySummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -69,6 +73,40 @@ data class TaskMemoryEntity(
     val updatedAt: Long,
 )
 
+@Entity(
+    tableName = "agent_checkpoints",
+    foreignKeys = [ForeignKey(
+        entity = ChatEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["chatId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("chatId")],
+)
+data class AgentCheckpointEntity(
+    @PrimaryKey val chatId: String,
+    val checkpointJson: String,
+    val updatedAt: Long,
+)
+
+/** No FK: a recovery draft also represents a newly created, not-yet-canonical chat. */
+@Entity(tableName = "agent_recovery", indices = [Index("updatedAt")])
+data class AgentRecoveryEntity(
+    @PrimaryKey val chatId: String,
+    val isCanonicalChat: Boolean,
+    val title: String,
+    val createdAt: Long,
+    val chatUpdatedAt: Long,
+    val contextJson: String,
+    val taskGoal: String,
+    val taskConstraintsJson: String,
+    val taskDesiredResult: String,
+    val taskDecisionsJson: String,
+    val taskUpdatedAt: Long,
+    val checkpointJson: String,
+    val updatedAt: Long,
+)
+
 @Dao
 internal interface ChatDao {
     @Query("SELECT id, title, updatedAt FROM chats ORDER BY updatedAt DESC, id ASC")
@@ -99,19 +137,43 @@ internal interface MemoryDao {
     suspend fun deleteTaskMemory(chatId: String)
 }
 
+internal data class RecoverySummaryRow(val chatId: String, val isCanonicalChat: Boolean, val updatedAt: Long)
+
+@Dao
+internal interface AgentDao {
+    @Query("SELECT * FROM agent_checkpoints WHERE chatId = :chatId")
+    suspend fun readCheckpoint(chatId: String): AgentCheckpointEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCheckpoint(checkpoint: AgentCheckpointEntity)
+
+    @Query("SELECT * FROM agent_recovery WHERE chatId = :chatId")
+    suspend fun readRecovery(chatId: String): AgentRecoveryEntity?
+
+    @Query("SELECT chatId, isCanonicalChat, updatedAt FROM agent_recovery ORDER BY updatedAt DESC, chatId ASC")
+    fun recoverySummaries(): Flow<List<RecoverySummaryRow>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRecovery(recovery: AgentRecoveryEntity)
+
+    @Query("DELETE FROM agent_recovery WHERE chatId = :chatId")
+    suspend fun deleteRecovery(chatId: String)
+}
+
 internal data class ChatSummaryRow(val id: String, val title: String, val updatedAt: Long)
 
 @Database(
-    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class],
-    version = 3,
+    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class, AgentCheckpointEntity::class, AgentRecoveryEntity::class],
+    version = 4,
     exportSchema = true,
 )
 internal abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun memoryDao(): MemoryDao
+    abstract fun agentDao(): AgentDao
 }
 
-class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage {
+class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage, AgentStorage {
     override fun observeSummaries(): Flow<List<StoredChatSummary>> =
         database.chatDao().summaries().map { rows ->
             rows.map { StoredChatSummary(it.id, it.title, it.updatedAt) }
@@ -147,6 +209,37 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
     override suspend fun readTaskMemory(chatId: String): StoredTaskMemory? =
         database.memoryDao().readTaskMemory(chatId)?.toStored()
 
+    override fun observeRecoverySummaries(): Flow<List<StoredRecoverySummary>> =
+        database.agentDao().recoverySummaries().map { rows ->
+            rows.map { StoredRecoverySummary(it.chatId, it.isCanonicalChat, it.updatedAt) }
+        }
+
+    override suspend fun readAgentCheckpoint(chatId: String): StoredAgentCheckpoint? =
+        database.agentDao().readCheckpoint(chatId)?.toStored()
+
+    override suspend fun readAgentRecovery(chatId: String): StoredAgentRecovery? =
+        database.agentDao().readRecovery(chatId)?.toStored()
+
+    override suspend fun writeAgentRecovery(recovery: StoredAgentRecovery): StorageResult = runStorage {
+        database.agentDao().upsertRecovery(recovery.toEntity())
+    }
+
+    override suspend fun promoteAgentRecovery(recovery: StoredAgentRecovery): StorageResult = runStorage {
+        database.withTransaction {
+            database.chatDao().upsert(ChatEntity(recovery.chatId, recovery.title, recovery.createdAt, recovery.chatUpdatedAt, recovery.contextJson))
+            database.memoryDao().upsertTaskMemory(TaskMemoryEntity(
+                recovery.chatId, recovery.taskGoal, recovery.taskConstraintsJson,
+                recovery.taskDesiredResult, recovery.taskDecisionsJson, recovery.taskUpdatedAt,
+            ))
+            database.agentDao().upsertCheckpoint(AgentCheckpointEntity(recovery.chatId, recovery.checkpointJson, recovery.updatedAt))
+            database.agentDao().deleteRecovery(recovery.chatId)
+        }
+    }
+
+    override suspend fun discardAgentRecovery(chatId: String): StorageResult = runStorage {
+        database.agentDao().deleteRecovery(chatId)
+    }
+
     private suspend fun runStorage(block: suspend () -> Unit): StorageResult = try {
         block()
         StorageResult.Success
@@ -169,7 +262,7 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
                 context.applicationContext,
                 AppDatabase::class.java,
                 databaseName,
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }
 
@@ -215,6 +308,17 @@ private fun TaskMemoryEntity.toStored() = StoredTaskMemory(
     decisionsJson,
     updatedAt,
 )
+private fun AgentCheckpointEntity.toStored() = StoredAgentCheckpoint(chatId, checkpointJson, updatedAt)
+private fun AgentRecoveryEntity.toStored() = StoredAgentRecovery(
+    chatId, isCanonicalChat, title, createdAt, chatUpdatedAt, contextJson,
+    taskGoal, taskConstraintsJson, taskDesiredResult, taskDecisionsJson,
+    taskUpdatedAt, checkpointJson, updatedAt,
+)
+private fun StoredAgentRecovery.toEntity() = AgentRecoveryEntity(
+    chatId, isCanonicalChat, title, createdAt, chatUpdatedAt, contextJson,
+    taskGoal, taskConstraintsJson, taskDesiredResult, taskDecisionsJson,
+    taskUpdatedAt, checkpointJson, updatedAt,
+)
 
 internal val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -250,6 +354,15 @@ internal val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("ALTER TABLE `agent_profile` ADD COLUMN `customLanguage` TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE `agent_profile` ADD COLUMN `customTone` TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE `agent_profile` ADD COLUMN `customDetailLevel` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+internal val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `agent_checkpoints` (`chatId` TEXT NOT NULL, `checkpointJson` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`chatId`), FOREIGN KEY(`chatId`) REFERENCES `chats`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_checkpoints_chatId` ON `agent_checkpoints` (`chatId`)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `agent_recovery` (`chatId` TEXT NOT NULL, `isCanonicalChat` INTEGER NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `chatUpdatedAt` INTEGER NOT NULL, `contextJson` TEXT NOT NULL, `taskGoal` TEXT NOT NULL, `taskConstraintsJson` TEXT NOT NULL, `taskDesiredResult` TEXT NOT NULL, `taskDecisionsJson` TEXT NOT NULL, `taskUpdatedAt` INTEGER NOT NULL, `checkpointJson` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`chatId`))""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_recovery_updatedAt` ON `agent_recovery` (`updatedAt`)")
     }
 }
 

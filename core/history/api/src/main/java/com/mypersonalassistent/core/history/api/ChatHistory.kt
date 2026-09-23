@@ -9,10 +9,28 @@ data class ChatMessage(val id: String, val role: MessageRole, val content: Strin
 data class ChatSnapshot(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val messages: List<ChatMessage>)
 class HistoryCorruptionException : IllegalStateException("Stored chat cannot be decoded")
 data class ChatSummary(val id: String, val title: String, val updatedAt: Long)
+data class AgentRecovery(
+    val snapshot: ChatSnapshot,
+    val taskMemory: TaskMemory,
+    /** Opaque bounded payload owned by core:agent. */
+    val checkpointJson: String,
+    val isCanonicalChat: Boolean,
+    val updatedAt: Long,
+)
+data class AgentRecoverySummary(val chatId: String, val isCanonicalChat: Boolean, val updatedAt: Long)
 interface HistoryRepository {
     fun observeSummaries(): Flow<List<ChatSummary>>
     suspend fun read(id: String): ChatSnapshot?
     suspend fun save(snapshot: ChatSnapshot): Boolean
     /** Saves the chat and its task context atomically. */
     suspend fun save(snapshot: ChatSnapshot, taskMemory: TaskMemory): Boolean
+}
+interface AgentRecoveryRepository {
+    fun observeRecovery(): Flow<List<AgentRecoverySummary>>
+    suspend fun readCheckpoint(chatId: String): String?
+    suspend fun readRecovery(chatId: String): AgentRecovery?
+    suspend fun writeRecovery(recovery: AgentRecovery): Boolean
+    /** Canonical chat, working memory and checkpoint are written in one transaction. */
+    suspend fun promoteRecovery(recovery: AgentRecovery): Boolean
+    suspend fun discardRecovery(chatId: String): Boolean
 }

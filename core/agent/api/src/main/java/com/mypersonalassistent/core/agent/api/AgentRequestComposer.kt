@@ -10,4 +10,13 @@ interface AgentRequestComposer {
         messages: List<ChatMessage>,
         taskMemory: TaskMemory? = null,
     ): LlmRequest
+
+    /** Builds a bounded, phase-specific request while preserving the latest user input. */
+    suspend fun composeForTask(
+        chatId: String,
+        messages: List<ChatMessage>,
+        taskMemory: TaskMemory,
+        checkpointContext: String,
+        phaseInstruction: String,
+    ): LlmRequest = compose(chatId, messages, taskMemory)
 }
