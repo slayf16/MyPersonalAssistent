@@ -14,6 +14,7 @@ import com.mypersonalassistent.core.memory.api.ResponseDetail
 import com.mypersonalassistent.core.memory.api.ResponseLanguage
 import com.mypersonalassistent.core.memory.api.ResponseTone
 import com.mypersonalassistent.core.memory.api.TaskMemory
+import com.mypersonalassistent.core.invariants.api.InvariantSnapshot
 
 class DefaultAgentRequestComposer(
     private val memory: MemoryRepository,
@@ -61,6 +62,44 @@ class DefaultAgentRequestComposer(
         val command = phaseInstruction.bounded(PHASE_INSTRUCTION_LIMIT)
         val system = buildList {
             add(LlmMessage(LlmRole.SYSTEM, BASE_POLICY))
+            memoryBlock?.let { add(LlmMessage(LlmRole.SYSTEM, it)) }
+            add(LlmMessage(LlmRole.SYSTEM, "[[AGENT_CHECKPOINT_DATA]]\n${escape(checkpointBlock)}\n[[END_AGENT_CHECKPOINT_DATA]]"))
+        }
+        val mandatoryCost = system.sumOf(::cost) + cost(latest) + cost(LlmMessage(LlmRole.SYSTEM, command))
+        require(mandatoryCost <= maxCharacters) { "Agent context exceeds the bounded request budget" }
+        var remaining = maxCharacters - mandatoryCost
+        val previous = mutableListOf<ChatMessage>()
+        for (message in messages.dropLast(1).asReversed()) {
+            if (message.deliveryState != DeliveryState.COMPLETE) continue
+            val candidate = cost(message.toLlm())
+            if (candidate > remaining) break
+            previous += message
+            remaining -= candidate
+        }
+        return LlmRequest(system + (previous.asReversed() + messages.last()).map { it.toLlm() } + LlmMessage(LlmRole.SYSTEM, command))
+    }
+
+    override suspend fun composeForTaskWithInvariants(
+        chatId: String,
+        messages: List<ChatMessage>,
+        taskMemory: TaskMemory,
+        checkpointContext: String,
+        phaseInstruction: String,
+        snapshot: InvariantSnapshot,
+    ): LlmRequest {
+        require(messages.isNotEmpty()) { "Latest user input is required" }
+        val latest = messages.last().toLlm()
+        val policy = snapshot.entries.joinToString("\n") { entry ->
+            "id=${escape(entry.ruleId.value)}; revision=${entry.ruleRevision.value}; category=${entry.category.name}; title=${escape(entry.title)}; statement=${escape(entry.statement)}"
+        }
+        val profile = memory.readProfile()
+        val task = taskMemory.takeIf { it.chatId == chatId } ?: memory.readTaskMemory(chatId)
+        val memoryBlock = buildMemoryBlock(profile, task)?.bounded(PROFILE_AND_TASK_LIMIT)
+        val checkpointBlock = checkpointContext.bounded(CHECKPOINT_LIMIT)
+        val command = phaseInstruction.bounded(PHASE_INSTRUCTION_LIMIT)
+        val system = buildList {
+            add(LlmMessage(LlmRole.SYSTEM, BASE_POLICY))
+            add(LlmMessage(LlmRole.SYSTEM, "[[INVARIANT_POLICY]]\n${escape(policy)}\n[[END_INVARIANT_POLICY]]"))
             memoryBlock?.let { add(LlmMessage(LlmRole.SYSTEM, it)) }
             add(LlmMessage(LlmRole.SYSTEM, "[[AGENT_CHECKPOINT_DATA]]\n${escape(checkpointBlock)}\n[[END_AGENT_CHECKPOINT_DATA]]"))
         }

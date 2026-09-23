@@ -39,6 +39,7 @@ internal class HomeStoreFactory(
                 HomeIntent.NewChat -> publish(HomeEffect.NewChat)
                 HomeIntent.EditKey -> publish(HomeEffect.EditKey)
                 HomeIntent.EditProfile -> publish(HomeEffect.EditProfile)
+                HomeIntent.OpenInvariants -> publish(HomeEffect.OpenInvariants)
                 is HomeIntent.Open -> publish(HomeEffect.Open(intent.id))
                 is HomeIntent.ContinueRecovery -> publish(HomeEffect.Open(intent.id))
                 is HomeIntent.DiscardRecovery -> discard(intent.id)

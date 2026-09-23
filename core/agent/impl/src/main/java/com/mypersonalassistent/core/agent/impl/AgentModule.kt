@@ -6,5 +6,5 @@ import org.koin.dsl.module
 
 val agentModule = module {
     single<AgentRequestComposer> { DefaultAgentRequestComposer(get()) }
-    factory<AgentRunEngine> { DefaultAgentRunEngine(get(), get(), get(), get()) }
+    factory<AgentRunEngine> { DefaultAgentRunEngine(get(), get(), get(), get(), invariants = get(), guard = get()) }
 }

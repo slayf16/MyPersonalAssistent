@@ -1,7 +1,6 @@
 package com.mypersonalassistent.core.agent.impl
 
 import com.mypersonalassistent.core.agent.api.AgentCheckpoint
-import com.mypersonalassistent.core.agent.api.AgentPhase
 import com.mypersonalassistent.core.agent.api.AgentPlanStep
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -10,7 +9,7 @@ internal sealed interface EnvelopeResult {
     data object Failure : EnvelopeResult
     data class Plan(val steps: List<AgentPlanStep>) : EnvelopeResult
     data class Question(val question: String) : EnvelopeResult
-    data class Step(val artifact: String, val summary: String) : EnvelopeResult
+    data class Step(val stepId: String?, val artifact: String, val summary: String, val revised: Boolean) : EnvelopeResult
     data object Pass : EnvelopeResult
     data class Revise(val issues: List<String>) : EnvelopeResult
 }
@@ -25,12 +24,12 @@ internal object AgentEnvelopeParser {
         val envelope = json.decodeFromString<EnvelopeWire>(raw)
         if (envelope.schemaVersion != 1 || envelope.runId != checkpoint.runId || envelope.revision != checkpoint.revision) return EnvelopeResult.Failure
         when (envelope.kind) {
-            "PLAN_READY" -> if (checkpoint.phase == AgentPhase.PLANNING && envelope.steps.size in 1..3 && envelope.steps.all { it.id.valid(36) && it.title.valid(120) && it.successCriterion.valid(300) }) EnvelopeResult.Plan(envelope.steps.map { AgentPlanStep(it.id!!, it.title!!, it.successCriterion!!) }) else EnvelopeResult.Failure
-            "NEEDS_USER" -> if (checkpoint.phase == AgentPhase.PLANNING && envelope.question.valid(500) && envelope.expectedInput.valid(240)) EnvelopeResult.Question(envelope.question!!) else EnvelopeResult.Failure
-            "STEP_RESULT" -> if (!checkpoint.revisionPending && checkpoint.phase == AgentPhase.EXECUTION && envelope.stepId == checkpoint.plan.getOrNull(checkpoint.currentStepIndex)?.id && envelope.artifact.valid(8_000) && envelope.summary.valid(1_000)) EnvelopeResult.Step(envelope.artifact!!, envelope.summary!!) else EnvelopeResult.Failure
-            "REVISED_RESULT" -> if (checkpoint.revisionPending && checkpoint.phase == AgentPhase.EXECUTION && envelope.artifact.valid(8_000) && envelope.summary.valid(1_000)) EnvelopeResult.Step(envelope.artifact!!, envelope.summary!!) else EnvelopeResult.Failure
-            "PASS" -> if (checkpoint.phase == AgentPhase.VALIDATION) EnvelopeResult.Pass else EnvelopeResult.Failure
-            "REVISE" -> if (checkpoint.phase == AgentPhase.VALIDATION && envelope.issues.size in 1..5 && envelope.issues.all { it.valid(400) }) EnvelopeResult.Revise(envelope.issues) else EnvelopeResult.Failure
+            "PLAN_READY" -> if (envelope.steps.size in 1..3 && envelope.steps.all { it.id.valid(36) && it.title.valid(120) && it.successCriterion.valid(300) }) EnvelopeResult.Plan(envelope.steps.map { AgentPlanStep(it.id!!, it.title!!, it.successCriterion!!) }) else EnvelopeResult.Failure
+            "NEEDS_USER" -> if (envelope.question.valid(500) && envelope.expectedInput.valid(240)) EnvelopeResult.Question(envelope.question!!) else EnvelopeResult.Failure
+            "STEP_RESULT" -> if (envelope.stepId.valid(36) && envelope.artifact.valid(8_000) && envelope.summary.valid(1_000)) EnvelopeResult.Step(envelope.stepId, envelope.artifact!!, envelope.summary!!, revised = false) else EnvelopeResult.Failure
+            "REVISED_RESULT" -> if (envelope.artifact.valid(8_000) && envelope.summary.valid(1_000)) EnvelopeResult.Step(null, envelope.artifact!!, envelope.summary!!, revised = true) else EnvelopeResult.Failure
+            "PASS" -> EnvelopeResult.Pass
+            "REVISE" -> if (envelope.issues.size in 1..5 && envelope.issues.all { it.valid(400) }) EnvelopeResult.Revise(envelope.issues) else EnvelopeResult.Failure
             else -> EnvelopeResult.Failure
         }
         } catch (_: Throwable) {
