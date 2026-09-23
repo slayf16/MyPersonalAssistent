@@ -4,12 +4,14 @@ import com.arkivanov.mvikotlin.core.store.Reducer
 import com.arkivanov.mvikotlin.core.store.Store
 import com.arkivanov.mvikotlin.core.store.StoreFactory
 import com.arkivanov.mvikotlin.extensions.coroutines.CoroutineExecutor
+import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.feature.home.api.HomeEffect
 import com.mypersonalassistent.feature.home.api.HomeIntent
 import com.mypersonalassistent.feature.home.api.HomeState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -18,19 +20,15 @@ internal interface HomeStore : Store<HomeIntent, HomeState, HomeEffect>
 internal class HomeStoreFactory(
     private val factory: StoreFactory,
     private val history: HistoryRepository,
+    private val recovery: AgentRecoveryRepository,
 ) {
     fun create(): HomeStore = object : HomeStore,
         Store<HomeIntent, HomeState, HomeEffect> by factory.create(
-            name = "HomeStore",
-            initialState = HomeState(),
-            bootstrapper = null,
-            executorFactory = ::Executor,
-            reducer = ReducerImpl,
+            name = "HomeStore", initialState = HomeState(), bootstrapper = null,
+            executorFactory = ::Executor, reducer = ReducerImpl,
         ) {}
 
-    private sealed interface Message {
-        data class State(val value: HomeState) : Message
-    }
+    private sealed interface Message { data class State(val value: HomeState) : Message }
 
     private inner class Executor : CoroutineExecutor<HomeIntent, Nothing, HomeState, Message, HomeEffect>() {
         private var observing: Job? = null
@@ -42,6 +40,8 @@ internal class HomeStoreFactory(
                 HomeIntent.EditKey -> publish(HomeEffect.EditKey)
                 HomeIntent.EditProfile -> publish(HomeEffect.EditProfile)
                 is HomeIntent.Open -> publish(HomeEffect.Open(intent.id))
+                is HomeIntent.ContinueRecovery -> publish(HomeEffect.Open(intent.id))
+                is HomeIntent.DiscardRecovery -> discard(intent.id)
             }
         }
 
@@ -50,9 +50,9 @@ internal class HomeStoreFactory(
             dispatch(Message.State(HomeState(isLoading = true)))
             observing = scope.launch {
                 try {
-                    history.observeSummaries().collect { summaries ->
-                        dispatch(Message.State(HomeState(isLoading = false, chats = summaries)))
-                    }
+                    combine(history.observeSummaries(), recovery.observeRecovery()) { chats, drafts ->
+                        HomeState(isLoading = false, chats = chats, recovery = drafts)
+                    }.collect { dispatch(Message.State(it)) }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
@@ -61,11 +61,21 @@ internal class HomeStoreFactory(
                 }
             }
         }
+
+        private fun discard(id: String) {
+            scope.launch {
+                try {
+                    if (!recovery.discardRecovery(id)) publish(HomeEffect.TechnicalError)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    publish(HomeEffect.TechnicalError)
+                }
+            }
+        }
     }
 
     private object ReducerImpl : Reducer<HomeState, Message> {
-        override fun HomeState.reduce(msg: Message): HomeState = when (msg) {
-            is Message.State -> msg.value
-        }
+        override fun HomeState.reduce(msg: Message): HomeState = when (msg) { is Message.State -> msg.value }
     }
 }

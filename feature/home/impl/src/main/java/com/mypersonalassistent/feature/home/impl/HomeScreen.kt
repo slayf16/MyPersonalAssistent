@@ -63,11 +63,28 @@ import kotlinx.coroutines.flow.StateFlow
                     Text("Не удалось загрузить чаты.")
                     TextButton(onClick = { accept(HomeIntent.Retry) }) { Text("Повторить") }
                 }
-                state.chats.isEmpty() -> EmptyChatsContent(Modifier.align(Alignment.Center))
+                state.chats.isEmpty() && state.recovery.none { !it.isCanonicalChat } -> EmptyChatsContent(Modifier.align(Alignment.Center))
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(bottom = 80.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    state.recovery.firstOrNull { !it.isCanonicalChat }?.let { draft ->
+                        item(key = "recovery-${draft.chatId}") {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("Незавершённая задача", style = MaterialTheme.typography.titleMedium)
+                                    Text("Восстановите локальный черновик или удалите его.")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = { accept(HomeIntent.ContinueRecovery(draft.chatId)) }) { Text("Продолжить") }
+                                        TextButton(onClick = { accept(HomeIntent.DiscardRecovery(draft.chatId)) }) { Text("Удалить") }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     items(state.chats, key = { it.id }) { chat ->
                         Card(
                             modifier = Modifier
@@ -75,11 +92,10 @@ import kotlinx.coroutines.flow.StateFlow
                                 .clickable { accept(HomeIntent.Open(chat.id)) }
                                 .semantics { contentDescription = "Открыть чат ${chat.title}" }
                         ) {
-                            Text(
-                                text = chat.title,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = chat.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                if (state.recovery.any { it.isCanonicalChat && it.chatId == chat.id }) Text("Незавершено", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }

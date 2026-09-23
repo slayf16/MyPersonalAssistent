@@ -17,9 +17,9 @@ import com.arkivanov.decompose.defaultComponentContext
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.mypersonalassistent.core.credentials.api.CredentialRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
-import com.mypersonalassistent.core.llm.api.Llm
+import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
-import com.mypersonalassistent.core.agent.api.AgentRequestComposer
+import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.impl.ChatScreen
 import com.mypersonalassistent.feature.credentials.impl.CredentialsScreen
@@ -50,10 +50,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val credentials = org.koin.java.KoinJavaComponent.get<CredentialRepository>(CredentialRepository::class.java)
         val history = org.koin.java.KoinJavaComponent.get<HistoryRepository>(HistoryRepository::class.java)
+        val recovery = org.koin.java.KoinJavaComponent.get<AgentRecoveryRepository>(AgentRecoveryRepository::class.java)
         val memory = org.koin.java.KoinJavaComponent.get<MemoryRepository>(MemoryRepository::class.java)
-        val composer = org.koin.java.KoinJavaComponent.get<AgentRequestComposer>(AgentRequestComposer::class.java)
-        val llm = org.koin.java.KoinJavaComponent.get<Llm>(Llm::class.java)
-        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, memory, composer, llm)
+        val engine = org.koin.java.KoinJavaComponent.get<AgentRunEngine>(AgentRunEngine::class.java)
+        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, recovery, memory, engine)
         setContent {
             MyPersonalAssistentTheme {
                 Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) {

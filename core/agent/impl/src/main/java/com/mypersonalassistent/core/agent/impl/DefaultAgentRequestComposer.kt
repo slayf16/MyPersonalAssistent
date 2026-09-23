@@ -45,6 +45,39 @@ class DefaultAgentRequestComposer(
         return LlmRequest(systemMessages + session)
     }
 
+    override suspend fun composeForTask(
+        chatId: String,
+        messages: List<ChatMessage>,
+        taskMemory: TaskMemory,
+        checkpointContext: String,
+        phaseInstruction: String,
+    ): LlmRequest {
+        require(messages.isNotEmpty()) { "Latest user input is required" }
+        val latest = messages.last().toLlm()
+        val profile = memory.readProfile()
+        val task = taskMemory.takeIf { it.chatId == chatId } ?: memory.readTaskMemory(chatId)
+        val memoryBlock = buildMemoryBlock(profile, task)?.bounded(PROFILE_AND_TASK_LIMIT)
+        val checkpointBlock = checkpointContext.bounded(CHECKPOINT_LIMIT)
+        val command = phaseInstruction.bounded(PHASE_INSTRUCTION_LIMIT)
+        val system = buildList {
+            add(LlmMessage(LlmRole.SYSTEM, BASE_POLICY))
+            memoryBlock?.let { add(LlmMessage(LlmRole.SYSTEM, it)) }
+            add(LlmMessage(LlmRole.SYSTEM, "[[AGENT_CHECKPOINT_DATA]]\n${escape(checkpointBlock)}\n[[END_AGENT_CHECKPOINT_DATA]]"))
+        }
+        val mandatoryCost = system.sumOf(::cost) + cost(latest) + cost(LlmMessage(LlmRole.SYSTEM, command))
+        require(mandatoryCost <= maxCharacters) { "Agent context exceeds the bounded request budget" }
+        var remaining = maxCharacters - mandatoryCost
+        val previous = mutableListOf<ChatMessage>()
+        for (message in messages.dropLast(1).asReversed()) {
+            if (message.deliveryState != DeliveryState.COMPLETE) continue
+            val candidate = cost(message.toLlm())
+            if (candidate > remaining) break
+            previous += message
+            remaining -= candidate
+        }
+        return LlmRequest(system + (previous.asReversed() + messages.last()).map { it.toLlm() } + LlmMessage(LlmRole.SYSTEM, command))
+    }
+
     private fun buildMemoryBlock(profile: ProfileMemory, task: TaskMemory): String? {
         val profileLines = buildList {
             if (profile.onboardingStatus == OnboardingStatus.COMPLETED) {
@@ -91,6 +124,9 @@ class DefaultAgentRequestComposer(
         .replace("\n", "\\n")
         .replace("[[", "\\[\\[")
 
+    private fun String.bounded(limit: Int): String =
+        codePoints().limit(limit.toLong()).toArray().let { String(it, 0, it.size) }
+
     /**
      * `OTHER` is a UI sentinel, never a meaningful preference for the LLM.  A malformed
      * legacy record without its corresponding value is omitted rather than inventing one.
@@ -106,6 +142,9 @@ class DefaultAgentRequestComposer(
 
     companion object {
         const val DEFAULT_CONTEXT_CHARACTERS = 24_000
+        private const val PROFILE_AND_TASK_LIMIT = 8_000
+        private const val CHECKPOINT_LIMIT = 10_000
+        private const val PHASE_INSTRUCTION_LIMIT = 1_000
         private const val MESSAGE_OVERHEAD = 16
         private const val BASE_POLICY =
             "You are MyPersonalAssistent. Follow the application policy, use only the provided memory for personalization, and never claim to remember data that is absent."

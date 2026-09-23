@@ -10,9 +10,9 @@ import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
 import com.mypersonalassistent.core.history.api.HistoryRepository
-import com.mypersonalassistent.core.llm.api.Llm
+import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
-import com.mypersonalassistent.core.agent.api.AgentRequestComposer
+import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.feature.chat.impl.ChatFeatureComponent
 import com.mypersonalassistent.core.credentials.api.CredentialRepository
 import com.mypersonalassistent.feature.credentials.impl.CredentialsFeatureComponent
@@ -53,12 +53,13 @@ class CredentialsComponent(
 class HomeComponent(
     componentContext: ComponentContext,
     history: HistoryRepository,
+    recovery: AgentRecoveryRepository,
     val onNew: () -> Unit,
     val onOpen: (String) -> Unit,
     val onEditKey: () -> Unit,
     val onEditProfile: () -> Unit,
 ) : ComponentContext by componentContext {
-    val feature = HomeFeatureComponent(componentContext, history)
+    val feature = HomeFeatureComponent(componentContext, history, recovery)
 }
 
 class ChatComponent(
@@ -66,20 +67,20 @@ class ChatComponent(
     id: String,
     history: HistoryRepository,
     memory: MemoryRepository,
-    composer: AgentRequestComposer,
-    llm: Llm,
+    engine: AgentRunEngine,
+    recovery: AgentRecoveryRepository,
     val onExit: () -> Unit
 ) : ComponentContext by componentContext {
-    val feature = ChatFeatureComponent(componentContext, id, history, memory, composer, llm)
+    val feature = ChatFeatureComponent(componentContext, id, history, memory, engine, recovery)
 }
 
 class DefaultRootComponent(
     componentContext: ComponentContext,
     private val credentials: CredentialRepository,
     private val history: HistoryRepository,
+    private val recovery: AgentRecoveryRepository,
     private val memory: MemoryRepository,
-    private val composer: AgentRequestComposer,
-    private val llm: Llm,
+    private val engine: AgentRunEngine,
 ) : RootComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     override val childStack: Value<ChildStack<*, RootComponent.Child>> = childStack(
@@ -109,6 +110,7 @@ class DefaultRootComponent(
                 HomeComponent(
                     context,
                     history,
+                    recovery,
                     onNew = { navigation.push(Config.Chat(UUID.randomUUID().toString())) },
                     onOpen = { navigation.push(Config.Chat(it)) },
                     onEditKey = { navigation.push(Config.Credentials(false)) },
@@ -121,8 +123,8 @@ class DefaultRootComponent(
                     config.id,
                     history,
                     memory,
-                    composer,
-                    llm
+                    engine,
+                    recovery
                 ) { navigation.pop() })
         }
 

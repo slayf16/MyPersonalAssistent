@@ -7,9 +7,9 @@ import com.arkivanov.mvikotlin.core.store.Store
 import com.arkivanov.mvikotlin.extensions.coroutines.labelsChannel
 import com.arkivanov.mvikotlin.extensions.coroutines.stateFlow
 import com.arkivanov.mvikotlin.main.store.DefaultStoreFactory
-import com.mypersonalassistent.core.agent.api.AgentRequestComposer
+import com.mypersonalassistent.core.agent.api.AgentRunEngine
+import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
-import com.mypersonalassistent.core.llm.api.Llm
 import com.mypersonalassistent.core.memory.api.MemoryRepository
 import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.api.ChatIntent
@@ -18,8 +18,8 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.StateFlow
 
 /** Lifecycle owner for the feature Store. InstanceKeeper preserves it across configuration changes. */
-class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, composer: AgentRequestComposer, llm: Llm) : ComponentContext by componentContext {
-    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, composer, llm).create()) }
+class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, engine: AgentRunEngine, recovery: AgentRecoveryRepository) : ComponentContext by componentContext {
+    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, engine, recovery).create()) }
     val state: StateFlow<ChatState> = retained.store.stateFlow(lifecycle)
     val effects: ReceiveChannel<ChatEffect> = retained.store.labelsChannel(lifecycle)
     init { retained.store.accept(ChatIntent.Load) }

@@ -39,4 +39,35 @@ interface MemoryStorage {
     suspend fun upsertProfile(profile: StoredProfile): StorageResult
     suspend fun readTaskMemory(chatId: String): StoredTaskMemory?
 }
+data class StoredAgentCheckpoint(
+    val chatId: String,
+    val checkpointJson: String,
+    val updatedAt: Long,
+)
+data class StoredAgentRecovery(
+    val chatId: String,
+    val isCanonicalChat: Boolean,
+    val title: String,
+    val createdAt: Long,
+    val chatUpdatedAt: Long,
+    val contextJson: String,
+    val taskGoal: String,
+    val taskConstraintsJson: String,
+    val taskDesiredResult: String,
+    val taskDecisionsJson: String,
+    val taskUpdatedAt: Long,
+    val checkpointJson: String,
+    val updatedAt: Long,
+)
+data class StoredRecoverySummary(val chatId: String, val isCanonicalChat: Boolean, val updatedAt: Long)
+interface AgentStorage {
+    fun observeRecoverySummaries(): Flow<List<StoredRecoverySummary>>
+    suspend fun readAgentCheckpoint(chatId: String): StoredAgentCheckpoint?
+    suspend fun readAgentRecovery(chatId: String): StoredAgentRecovery?
+    /** Writes only the non-canonical recovery draft. */
+    suspend fun writeAgentRecovery(recovery: StoredAgentRecovery): StorageResult
+    /** Atomically promotes chat, task memory and checkpoint, then removes the recovery draft. */
+    suspend fun promoteAgentRecovery(recovery: StoredAgentRecovery): StorageResult
+    suspend fun discardAgentRecovery(chatId: String): StorageResult
+}
 sealed interface StorageResult { data object Success : StorageResult; data object Failure : StorageResult }
