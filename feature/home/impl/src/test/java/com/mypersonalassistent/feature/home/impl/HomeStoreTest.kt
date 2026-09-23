@@ -1,6 +1,7 @@
 package com.mypersonalassistent.feature.home.impl
 
 import com.arkivanov.mvikotlin.main.store.DefaultStoreFactory
+import com.arkivanov.mvikotlin.core.rx.Observer
 import com.mypersonalassistent.core.history.api.AgentRecovery
 import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.AgentRecoverySummary
@@ -9,6 +10,7 @@ import com.mypersonalassistent.core.history.api.ChatSummary
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.feature.home.api.HomeIntent
+import com.mypersonalassistent.feature.home.api.HomeEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +45,21 @@ class HomeStoreTest {
         val store = HomeStoreFactory(DefaultStoreFactory(), FakeHistory, recovery).create()
         store.accept(HomeIntent.DiscardRecovery("new")); testScheduler.advanceUntilIdle()
         assertTrue(recovery.discarded.contains("new"))
+        store.dispose()
+    }
+
+    @Test fun `invariants entry publishes the dedicated navigation effect`() = runTest(dispatcher) {
+        val store = HomeStoreFactory(DefaultStoreFactory(), FakeHistory, FakeRecovery(emptyList())).create()
+        val effects = mutableListOf<HomeEffect>()
+        val collection = store.labels(object : Observer<HomeEffect> {
+            override fun onNext(value: HomeEffect) { effects += value }
+            override fun onComplete() = Unit
+        })
+
+        store.accept(HomeIntent.OpenInvariants)
+
+        assertEquals(listOf(HomeEffect.OpenInvariants), effects)
+        collection.dispose()
         store.dispose()
     }
 

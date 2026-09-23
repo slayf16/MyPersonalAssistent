@@ -39,6 +39,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,9 +67,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.MessageRole
+import com.mypersonalassistent.core.agent.api.AgentRunStatus
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import com.mypersonalassistent.feature.chat.api.ChatState
 import com.mypersonalassistent.feature.chat.api.AgentPrimaryAction
+import com.mypersonalassistent.feature.chat.api.toExactRefusalMessage
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -93,6 +96,9 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
     }
     if (state.taskEditorOpen) {
         TaskMemoryDialog(state = state, accept = accept)
+    }
+    if (state.planChangeDialog) {
+        PlanChangesDialog(state = state, accept = accept)
     }
 }
 
@@ -139,10 +145,11 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                 },
                 actions = {
                     when (state.agentUi.primaryAction) {
-                        AgentPrimaryAction.PAUSE -> TextButton(onClick = { accept(ChatIntent.Pause) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Пауза") }
-                        AgentPrimaryAction.RESUME -> TextButton(onClick = { accept(ChatIntent.Resume) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Продолжить") }
                         AgentPrimaryAction.RETRY -> TextButton(onClick = { accept(ChatIntent.Retry) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Повторить") }
                         AgentPrimaryAction.START_NEW_TASK -> TextButton(onClick = { accept(ChatIntent.StartNewTask) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Новая") }
+                        AgentPrimaryAction.APPROVE_PLAN -> TextButton(onClick = { accept(ChatIntent.ApprovePlan) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Утвердить") }
+                        AgentPrimaryAction.CONTINUE_WITH_CURRENT_RULES -> TextButton(onClick = { accept(ChatIntent.ContinueWithCurrentRules) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Продолжить") }
+                        AgentPrimaryAction.OPEN_INVARIANTS -> TextButton(onClick = { accept(ChatIntent.OpenInvariants) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = requireNotNull(state.agentUi.actionContentDescription) }) { Text("Инварианты") }
                         AgentPrimaryAction.NONE -> Unit
                     }
                     IconButton(
@@ -166,10 +173,10 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
             state.loading -> LoadingContent(contentPadding)
             state.loadFailed -> LoadFailedContent(contentPadding)
             else -> MessageList(
-                messages = state.messages,
-                sending = state.sending,
+                state = state,
                 listState = listState,
                 contentPadding = contentPadding,
+                accept = accept,
             )
         }
     }
@@ -177,10 +184,10 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
 
 @Composable
 private fun MessageList(
-    messages: List<ChatMessage>,
-    sending: Boolean,
+    state: ChatState,
     listState: LazyListState,
     contentPadding: PaddingValues,
+    accept: (ChatIntent) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -193,13 +200,94 @@ private fun MessageList(
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(messages, key = { it.id }) { message ->
+        items(state.messages, key = { it.id }) { message ->
             MessageBubble(message)
         }
-        if (sending) {
+        if (state.checkpoint?.runStatus == AgentRunStatus.WAITING_APPROVAL) {
+            item(key = "plan-approval") { PlanApprovalCard(state, accept) }
+        }
+        if (state.checkpoint?.runStatus == AgentRunStatus.STALE_PAUSED) {
+            item(key = "workflow-notice") { WorkflowNotice(state) }
+        }
+        state.safeRefusal?.toExactRefusalMessage()
+            ?.takeIf { state.checkpoint?.runStatus == AgentRunStatus.REFUSED }
+            ?.let { message ->
+                item(key = "invariant-refusal") { InvariantRefusalNotice(message) }
+        }
+        if (state.sending) {
             item(key = "assistant-typing") { AssistantTypingBubble() }
         }
     }
+}
+
+@Composable
+private fun PlanApprovalCard(state: ChatState, accept: (ChatIntent) -> Unit) {
+    val steps = state.checkpoint?.plan.orEmpty()
+    Surface(
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "План задачи ожидает утверждения" },
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("План задачи", style = MaterialTheme.typography.titleMedium)
+            steps.forEachIndexed { index, step ->
+                Text("${index + 1}. ${step.title}\nКритерий: ${step.successCriterion}")
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { accept(ChatIntent.ApprovePlan) }, modifier = Modifier.semantics { contentDescription = "Утвердить план" }) { Text("Утвердить") }
+                TextButton(onClick = { accept(ChatIntent.OpenPlanChanges) }, modifier = Modifier.semantics { contentDescription = "Изменить план" }) { Text("Изменить план") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkflowNotice(state: ChatState) {
+    val message = state.agentUi.expectedAction
+    Surface(
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = message },
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Text(message, Modifier.padding(16.dp))
+    }
+}
+
+@Composable
+private fun InvariantRefusalNotice(message: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = message },
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Text(message, Modifier.padding(16.dp))
+    }
+}
+
+@Composable
+private fun PlanChangesDialog(state: ChatState, accept: (ChatIntent) -> Unit) {
+    val comment = state.planChangeComment
+    val valid = comment.trim().isNotEmpty() && comment.codePointCount(0, comment.length) <= 2_000
+    AlertDialog(
+        onDismissRequest = { accept(ChatIntent.ClosePlanChanges) },
+        title = { Text("Изменить план") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = comment,
+                    onValueChange = { accept(ChatIntent.ChangePlanComment(it)) },
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Комментарий к изменению плана" },
+                    label = { Text("Что изменить?") },
+                    supportingText = { Text("${comment.codePointCount(0, comment.length)}/2000") },
+                    minLines = 3,
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { accept(ChatIntent.SubmitPlanChanges) }, enabled = valid) { Text("Отправить") } },
+        dismissButton = { TextButton(onClick = { accept(ChatIntent.ClosePlanChanges) }) { Text("Отмена") } },
+    )
 }
 
 @Composable

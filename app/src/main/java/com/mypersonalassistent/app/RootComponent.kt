@@ -18,6 +18,8 @@ import com.mypersonalassistent.core.credentials.api.CredentialRepository
 import com.mypersonalassistent.feature.credentials.impl.CredentialsFeatureComponent
 import com.mypersonalassistent.feature.home.impl.HomeFeatureComponent
 import com.mypersonalassistent.feature.profile.impl.ProfileFeatureComponent
+import com.mypersonalassistent.feature.invariants.impl.InvariantsFeatureComponent
+import com.mypersonalassistent.core.invariants.api.InvariantRepository
 import java.util.UUID
 import kotlinx.serialization.Serializable
 
@@ -29,6 +31,7 @@ interface RootComponent {
         class Profile(val component: ProfileComponent) : Child();
         class Home(val component: HomeComponent) : Child();
         class Chat(val component: ChatComponent) : Child()
+        class Invariants(val component: InvariantsComponent) : Child()
     }
 }
 
@@ -58,6 +61,7 @@ class HomeComponent(
     val onOpen: (String) -> Unit,
     val onEditKey: () -> Unit,
     val onEditProfile: () -> Unit,
+    val onInvariants: () -> Unit,
 ) : ComponentContext by componentContext {
     val feature = HomeFeatureComponent(componentContext, history, recovery)
 }
@@ -69,9 +73,19 @@ class ChatComponent(
     memory: MemoryRepository,
     engine: AgentRunEngine,
     recovery: AgentRecoveryRepository,
-    val onExit: () -> Unit
+    invariants: InvariantRepository,
+    val onExit: () -> Unit,
+    val onInvariants: () -> Unit,
 ) : ComponentContext by componentContext {
-    val feature = ChatFeatureComponent(componentContext, id, history, memory, engine, recovery)
+    val feature = ChatFeatureComponent(componentContext, id, history, memory, engine, recovery, invariants)
+}
+
+class InvariantsComponent(
+    componentContext: ComponentContext,
+    repository: InvariantRepository,
+    val onExit: () -> Unit,
+) : ComponentContext by componentContext {
+    val feature = InvariantsFeatureComponent(componentContext, repository)
 }
 
 class DefaultRootComponent(
@@ -81,6 +95,7 @@ class DefaultRootComponent(
     private val recovery: AgentRecoveryRepository,
     private val memory: MemoryRepository,
     private val engine: AgentRunEngine,
+    private val invariants: InvariantRepository,
 ) : RootComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     override val childStack: Value<ChildStack<*, RootComponent.Child>> = childStack(
@@ -114,7 +129,8 @@ class DefaultRootComponent(
                     onNew = { navigation.push(Config.Chat(UUID.randomUUID().toString())) },
                     onOpen = { navigation.push(Config.Chat(it)) },
                     onEditKey = { navigation.push(Config.Credentials(false)) },
-                    onEditProfile = { navigation.push(Config.Profile(firstRun = false)) })
+                    onEditProfile = { navigation.push(Config.Profile(firstRun = false)) },
+                    onInvariants = { navigation.push(Config.Invariants) })
             )
 
             is Config.Chat -> RootComponent.Child.Chat(
@@ -124,8 +140,13 @@ class DefaultRootComponent(
                     history,
                     memory,
                     engine,
-                    recovery
-                ) { navigation.pop() })
+                    recovery,
+                    invariants,
+                    onExit = { navigation.pop() },
+                    onInvariants = { navigation.push(Config.Invariants) },
+                ))
+
+            Config.Invariants -> RootComponent.Child.Invariants(InvariantsComponent(context, invariants) { navigation.pop() })
         }
 
     @Serializable
@@ -138,5 +159,7 @@ class DefaultRootComponent(
         data object Home : Config;
         @Serializable
         data class Chat(val id: String) : Config
+        @Serializable
+        data object Invariants : Config
     }
 }

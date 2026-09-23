@@ -9,12 +9,14 @@ import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.core.agent.api.AgentRunInput
 import com.mypersonalassistent.core.agent.api.AgentRunResult
 import com.mypersonalassistent.core.agent.api.AgentRunStatus
-import com.mypersonalassistent.core.agent.api.ResumeOperation
+import com.mypersonalassistent.core.agent.api.PlanChangeContext
+import com.mypersonalassistent.core.agent.api.StartNewTask
 import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.history.api.MessageRole
+import com.mypersonalassistent.core.invariants.api.InvariantRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.feature.chat.api.ChatEffect
@@ -41,6 +43,7 @@ internal class ChatStoreFactory(
     private val memory: MemoryRepository,
     private val engine: AgentRunEngine,
     private val recovery: AgentRecoveryRepository,
+    private val invariants: InvariantRepository? = null,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
     fun create(): ChatStore = object : ChatStore,
@@ -64,8 +67,38 @@ internal class ChatStoreFactory(
             scope.launch {
                 engine.checkpoint.collect { checkpoint ->
                     // The engine serializes transitions and is the only source of in-flight progress.
-                    if (checkpoint?.chatId == id && !state().loading && !state().recoveryChoiceRequired) {
-                        set { copy(checkpoint = checkpoint, recoveryAvailable = true) }
+                    val shown = state().checkpoint
+                    if (
+                        checkpoint?.chatId == id &&
+                        !state().loading &&
+                        !state().recoveryChoiceRequired &&
+                        (shown == null || checkpoint.operationToken.value >= shown.operationToken.value)
+                    ) {
+                        set {
+                            copy(
+                                checkpoint = checkpoint,
+                                // Refusal metadata is local to the checkpoint that emitted it;
+                                // a subsequent unavailable/terminal result must not inherit it.
+                                refusal = checkpoint.refusal,
+                                recoveryAvailable = true,
+                            )
+                        }
+                    }
+                }
+            }
+            invariants?.let { repository ->
+                scope.launch {
+                    repository.changes.collect { change ->
+                        if (id !in change.affectedRunIds) return@collect
+                        val staleToken = ++token
+                        try {
+                            runJob?.cancelAndJoin()
+                            if (staleToken == token) engine.markStaleAfterPolicyMutation(id, change.affectedRunIds)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            if (staleToken == token) publish(ChatEffect.TechnicalError)
+                        }
                     }
                 }
             }
@@ -76,10 +109,15 @@ internal class ChatStoreFactory(
                 ChatIntent.Load -> load()
                 is ChatIntent.ChangeDraft -> if (canEditDraft()) set { copy(draft = intent.value) }
                 ChatIntent.Send -> send()
-                ChatIntent.Pause -> pause()
-                ChatIntent.Resume -> resume()
                 ChatIntent.ContinueRecovery -> continueRecovery()
                 ChatIntent.Retry -> retry()
+                ChatIntent.ApprovePlan -> approvePlan()
+                ChatIntent.OpenPlanChanges -> openPlanChanges()
+                is ChatIntent.ChangePlanComment -> changePlanComment(intent.value)
+                ChatIntent.SubmitPlanChanges -> submitPlanChanges()
+                ChatIntent.ClosePlanChanges -> if (!state().saving) set { copy(planChangeDialog = false) }
+                ChatIntent.ContinueWithCurrentRules -> continueWithCurrentRules()
+                ChatIntent.OpenInvariants -> if (state().checkpoint?.runStatus == AgentRunStatus.REFUSED) publish(ChatEffect.OpenInvariants)
                 ChatIntent.StartNewTask -> startNewTask()
                 ChatIntent.DiscardRecovery -> discardRecovery(reload = true)
                 ChatIntent.OpenTaskEditor -> openTaskEditor()
@@ -106,9 +144,7 @@ internal class ChatStoreFactory(
                     val storedTask = memory.readTaskMemory(id)
                     val draft = recovery.readRecovery(id)
                     val canonicalCheckpoint = recovery.readCheckpoint(id)?.let(engine::decodeCheckpoint)
-                    val restored = draft?.let { item ->
-                        item to engine.decodeCheckpoint(item.checkpointJson)?.normalizedAfterProcessDeath()
-                    }
+                    val restored = draft?.let { item -> item to engine.decodeCheckpoint(item.checkpointJson) }
                     // A recovery of an already saved chat requires a deliberate choice. It is never
                     // silently substituted for canonical history when the row is opened.
                     val chooseRecovery = draft != null && canonical != null
@@ -122,6 +158,7 @@ internal class ChatStoreFactory(
                             messages = snapshot?.messages.orEmpty(),
                             taskMemory = task,
                             checkpoint = checkpoint,
+                            refusal = checkpoint?.refusal,
                             recoveryAvailable = draft != null,
                             recoveryChoiceRequired = chooseRecovery,
                             loading = false,
@@ -141,26 +178,16 @@ internal class ChatStoreFactory(
             val text = before.draft
             if (text.isBlank() || !canEditDraft()) return
             val checkpoint = before.checkpoint
-            if (checkpoint?.runStatus == AgentRunStatus.PAUSED || checkpoint?.runStatus == AgentRunStatus.FAILED) return
+            if (checkpoint?.runStatus == AgentRunStatus.FAILED) return
             val user = ChatMessage(UUID.randomUUID().toString(), MessageRole.USER, text)
             val messages = before.messages + user
             set { copy(messages = messages, draft = "") }
             val action: suspend (AgentRunInput) -> AgentRunResult = when (checkpoint?.runStatus) {
-                AgentRunStatus.WAITING_USER -> engine::answer
+                AgentRunStatus.WAITING_USER,
+                AgentRunStatus.ACTIVE -> engine::answer
                 else -> engine::start
             }
             executeRun(messages, before.taskMemory, checkpoint, action)
-        }
-
-        private fun resume() {
-            val before = state()
-            val checkpoint = before.checkpoint ?: return
-            if (checkpoint.runStatus != AgentRunStatus.PAUSED && checkpoint.runStatus != AgentRunStatus.WAITING_USER) return
-            if (checkpoint.runStatus == AgentRunStatus.WAITING_USER) {
-                set { copy(checkpoint = checkpoint.copy(expectedAction = "Ответьте на вопрос")) }
-                return
-            }
-            executeRun(before.messages, before.taskMemory, checkpoint, engine::resume)
         }
 
         private fun retry() {
@@ -168,6 +195,41 @@ internal class ChatStoreFactory(
             val checkpoint = before.checkpoint ?: return
             if (checkpoint.runStatus != AgentRunStatus.FAILED || !checkpoint.retryAllowed) return
             executeRun(before.messages, before.taskMemory, checkpoint, engine::retry)
+        }
+
+        private fun approvePlan() {
+            val before = state()
+            val checkpoint = before.checkpoint ?: return
+            if (checkpoint.runStatus != AgentRunStatus.WAITING_APPROVAL) return
+            executeRun(before.messages, before.taskMemory, checkpoint) { input -> engine.approvePlan(input, checkpoint.revision) }
+        }
+
+        private fun openPlanChanges() {
+            if (state().checkpoint?.runStatus == AgentRunStatus.WAITING_APPROVAL && !state().saving) {
+                set { copy(planChangeDialog = true, planChangeComment = "") }
+            }
+        }
+
+        private fun changePlanComment(value: String) {
+            if (state().planChangeDialog && !state().saving) set { copy(planChangeComment = value.limitCodePoints(2_000)) }
+        }
+
+        private fun submitPlanChanges() {
+            val before = state()
+            val checkpoint = before.checkpoint ?: return
+            val comment = before.planChangeComment.trim()
+            if (checkpoint.runStatus != AgentRunStatus.WAITING_APPROVAL || comment.isEmpty()) return
+            set { copy(planChangeDialog = false) }
+            executeRun(before.messages, before.taskMemory, checkpoint) { input ->
+                engine.requestPlanChanges(input, PlanChangeContext(checkpoint.revision, comment))
+            }
+        }
+
+        private fun continueWithCurrentRules() {
+            val before = state()
+            val checkpoint = before.checkpoint ?: return
+            if (checkpoint.runStatus != AgentRunStatus.STALE_PAUSED) return
+            executeRun(before.messages, before.taskMemory, checkpoint, engine::continueWithCurrentRules)
         }
 
         private fun executeRun(
@@ -191,43 +253,48 @@ internal class ChatStoreFactory(
             }
         }
 
-        private suspend fun applyResult(result: AgentRunResult, messages: List<ChatMessage>, task: TaskMemory) {
+        private suspend fun applyResult(
+            result: AgentRunResult,
+            messages: List<ChatMessage>,
+            task: TaskMemory,
+            persistResult: Boolean = true,
+        ) {
             val visible = buildList {
                 addAll(messages)
                 result.visibleQuestion?.let { add(ChatMessage(UUID.randomUUID().toString(), MessageRole.ASSISTANT, it)) }
                 result.finalResult?.let { add(ChatMessage(UUID.randomUUID().toString(), MessageRole.ASSISTANT, it)) }
             }
             val updatedTask = task.copy(updatedAt = clock())
-            set { copy(messages = visible, taskMemory = updatedTask, checkpoint = result.checkpoint, recoveryAvailable = true) }
-            engine.persist(AgentRunInput(id, visible, updatedTask, result.checkpoint))
+            set {
+                copy(
+                    messages = visible,
+                    taskMemory = updatedTask,
+                    checkpoint = result.checkpoint,
+                    refusal = result.refusal ?: result.checkpoint.refusal,
+                    recoveryAvailable = persistResult,
+                )
+            }
+            if (persistResult) engine.persist(AgentRunInput(id, visible, updatedTask, result.checkpoint))
             if (result.failure != null) publish(ChatEffect.TechnicalError)
         }
 
-        private fun pause() {
-            val before = state()
-            val checkpoint = before.checkpoint ?: return
-            if (checkpoint.runStatus != AgentRunStatus.ACTIVE && checkpoint.runStatus != AgentRunStatus.WAITING_USER) return
-            val pauseToken = ++token
-            scope.launch {
-                try {
-                    runJob?.cancelAndJoin()
-                    val paused = engine.pause(AgentRunInput(id, state().messages, state().taskMemory))
-                    if (pauseToken == token) set { copy(checkpoint = paused, recoveryAvailable = true) }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Throwable) {
-                    if (pauseToken == token) publish(ChatEffect.TechnicalError)
-                }
-            }
-        }
-
         private fun startNewTask() {
-            ++token
-            scope.launch {
+            val before = state()
+            val expectedToken = before.checkpoint?.operationToken
+            val callToken = ++token
+            runJob = scope.launch {
                 try {
-                    runJob?.cancelAndJoin()
-                    engine.discardRecovery(id)
-                    set { copy(checkpoint = null, recoveryAvailable = false, draft = "") }
+                    // Termination, join and recovery/index closure belong to the engine.  The
+                    // feature only projects its authoritative result and ignores an old callback.
+                    val result = engine.startNewTask(
+                        StartNewTask(
+                            chatId = id,
+                            messages = before.messages,
+                            taskMemory = before.taskMemory,
+                            expectedOperationToken = expectedToken,
+                        ),
+                    )
+                    if (callToken == token) applyResult(result, before.messages, before.taskMemory, persistResult = false)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
@@ -242,7 +309,7 @@ internal class ChatStoreFactory(
             scope.launch {
                 try {
                     val draft = recovery.readRecovery(id) ?: throw IllegalStateException("Recovery is unavailable")
-                    val checkpoint = engine.decodeCheckpoint(draft.checkpointJson)?.normalizedAfterProcessDeath()
+                    val checkpoint = engine.decodeCheckpoint(draft.checkpointJson)
                         ?: throw IllegalStateException("Recovery checkpoint is invalid")
                     createdAt = draft.snapshot.createdAt
                     set {
@@ -250,6 +317,7 @@ internal class ChatStoreFactory(
                             messages = draft.snapshot.messages,
                             taskMemory = draft.taskMemory,
                             checkpoint = checkpoint,
+                            refusal = checkpoint.refusal,
                             recoveryAvailable = true,
                             recoveryChoiceRequired = false,
                         )
@@ -311,10 +379,11 @@ internal class ChatStoreFactory(
                 try {
                     runJob?.cancelAndJoin()
                     var current = state()
-                    val active = current.checkpoint
-                    if (active?.runStatus == AgentRunStatus.ACTIVE || active?.runStatus == AgentRunStatus.WAITING_USER) {
-                        val paused = engine.pause(AgentRunInput(id, current.messages, current.taskMemory))
-                        current = current.copy(checkpoint = paused)
+                    current.checkpoint?.let { checkpoint ->
+                        val normalized = engine.normalizeInterruptedForRecovery(
+                            AgentRunInput(id, current.messages, current.taskMemory, checkpoint),
+                        )
+                        current = current.copy(checkpoint = normalized.checkpoint, refusal = normalized.refusal ?: normalized.checkpoint.refusal)
                         set { current }
                     }
                     val saved = if (current.checkpoint != null) {
@@ -347,17 +416,12 @@ internal class ChatStoreFactory(
 
         private fun set(transform: ChatState.() -> ChatState) = dispatch(Message.State(state().transform()))
         private fun String.toItems() = lineSequence().map { it.trim() }.filter(String::isNotEmpty).toList()
+        private fun String.limitCodePoints(limit: Int): String {
+            if (codePointCount(0, length) <= limit) return this
+            return substring(0, offsetByCodePoints(0, limit))
+        }
         private fun titleOf(messages: List<ChatMessage>): String = messages.firstOrNull { it.role == MessageRole.USER }?.content?.replace(Regex("\\s+"), " ")?.take(60) ?: "Новый чат"
     }
-
-    private fun AgentCheckpoint.normalizedAfterProcessDeath(): AgentCheckpoint =
-        if (runStatus == AgentRunStatus.ACTIVE || inFlight) copy(
-            runStatus = AgentRunStatus.PAUSED,
-            inFlight = false,
-            pausedFromStatus = AgentRunStatus.ACTIVE,
-            resumeOperation = ResumeOperation.REPEAT_CALL,
-            expectedAction = "Продолжить",
-        ) else this
 
     private object ReducerImpl : Reducer<ChatState, Message> {
         override fun ChatState.reduce(msg: Message): ChatState = when (msg) { is Message.State -> msg.value }

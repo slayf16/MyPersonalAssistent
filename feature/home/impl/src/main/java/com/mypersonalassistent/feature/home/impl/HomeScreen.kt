@@ -52,6 +52,10 @@ import kotlinx.coroutines.flow.StateFlow
                 onClick = { accept(HomeIntent.EditKey) },
                 modifier = Modifier.semantics { contentDescription = "Сменить ключ" },
             ) { Text("Сменить ключ") }
+            TextButton(
+                onClick = { accept(HomeIntent.OpenInvariants) },
+                modifier = Modifier.semantics { contentDescription = "Открыть инварианты" },
+            ) { Text("Инварианты") }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when {

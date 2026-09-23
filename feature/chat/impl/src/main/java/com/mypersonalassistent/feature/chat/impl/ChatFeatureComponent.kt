@@ -11,6 +11,7 @@ import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
+import com.mypersonalassistent.core.invariants.api.InvariantRepository
 import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import com.mypersonalassistent.feature.chat.api.ChatState
@@ -18,8 +19,8 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.StateFlow
 
 /** Lifecycle owner for the feature Store. InstanceKeeper preserves it across configuration changes. */
-class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, engine: AgentRunEngine, recovery: AgentRecoveryRepository) : ComponentContext by componentContext {
-    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, engine, recovery).create()) }
+class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, engine: AgentRunEngine, recovery: AgentRecoveryRepository, invariants: InvariantRepository? = null) : ComponentContext by componentContext {
+    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, engine, recovery, invariants).create()) }
     val state: StateFlow<ChatState> = retained.store.stateFlow(lifecycle)
     val effects: ReceiveChannel<ChatEffect> = retained.store.labelsChannel(lifecycle)
     init { retained.store.accept(ChatIntent.Load) }

@@ -26,6 +26,18 @@ import com.mypersonalassistent.core.database.api.StoredTaskMemory
 import com.mypersonalassistent.core.database.api.StoredAgentCheckpoint
 import com.mypersonalassistent.core.database.api.StoredAgentRecovery
 import com.mypersonalassistent.core.database.api.StoredRecoverySummary
+import com.mypersonalassistent.core.database.api.InvariantStorage
+import com.mypersonalassistent.core.database.api.StoredInvariantRule
+import com.mypersonalassistent.core.database.api.StoredInvariantAudit
+import com.mypersonalassistent.core.database.api.StoredInvariantSnapshot
+import com.mypersonalassistent.core.database.api.StoredInvariantMutation
+import com.mypersonalassistent.core.database.api.StoredInvariantCommitResult
+import com.mypersonalassistent.core.database.api.StoredAgentRunIndex
+import com.mypersonalassistent.core.invariants.api.CollectionRevision
+import com.mypersonalassistent.core.invariants.api.InvariantCategory
+import com.mypersonalassistent.core.invariants.api.InvariantOperation
+import com.mypersonalassistent.core.invariants.api.InvariantRuleId
+import com.mypersonalassistent.core.invariants.api.RuleRevision
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -107,6 +119,33 @@ data class AgentRecoveryEntity(
     val updatedAt: Long,
 )
 
+@Entity(tableName = "invariant_collection")
+data class InvariantCollectionEntity(@PrimaryKey val id: Int = 1, val revision: Long)
+
+@Entity(tableName = "invariant_rules", indices = [Index(value = ["deletedAt", "enabled", "updatedAt", "id"]), Index(value = ["category", "statement", "deletedAt"])])
+data class InvariantRuleEntity(
+    @PrimaryKey val id: String, val title: String, val category: String, val statement: String,
+    val enabled: Boolean, val revision: Long, val createdAt: Long, val updatedAt: Long, val deletedAt: Long? = null,
+)
+
+@Entity(tableName = "invariant_audit", indices = [Index("ruleId"), Index("collectionRevision")])
+data class InvariantAuditEntity(
+    @PrimaryKey val eventId: String, val ruleId: String, val operation: String, val oldRevision: Long?, val newRevision: Long?,
+    val oldDigest: String?, val newDigest: String?, val collectionRevision: Long, val createdAt: Long,
+)
+
+@Entity(tableName = "invariant_snapshots", indices = [Index("collectionRevision"), Index("contentDigest")])
+data class InvariantSnapshotEntity(
+    @PrimaryKey val id: String, val collectionRevision: Long, val payload: String, val contentDigest: String,
+    val schemaVersion: Int, val createdAt: Long,
+)
+
+@Entity(tableName = "agent_run_index", indices = [Index(value = ["isNonterminal", "collectionRevision"]), Index("runId")])
+data class AgentRunIndexEntity(
+    @PrimaryKey val chatId: String, val runId: String, val collectionRevision: Long, val isNonterminal: Boolean,
+    val isActive: Boolean, val isStale: Boolean, val staleTarget: String?, val updatedAt: Long,
+)
+
 @Dao
 internal interface ChatDao {
     @Query("SELECT id, title, updatedAt FROM chats ORDER BY updatedAt DESC, id ASC")
@@ -160,20 +199,72 @@ internal interface AgentDao {
     suspend fun deleteRecovery(chatId: String)
 }
 
+@Dao
+internal interface InvariantDao {
+    @Query("SELECT * FROM invariant_rules WHERE deletedAt IS NULL ORDER BY enabled DESC, updatedAt DESC, id ASC")
+    fun observeCurrent(): Flow<List<InvariantRuleEntity>>
+
+    @Query("SELECT * FROM invariant_rules WHERE id = :id")
+    suspend fun readAny(id: String): InvariantRuleEntity?
+
+    @Query("SELECT * FROM invariant_rules")
+    suspend fun readAll(): List<InvariantRuleEntity>
+
+    @Query("SELECT revision FROM invariant_collection WHERE id = 1")
+    suspend fun collectionRevision(): Long?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun initializeCollection(row: InvariantCollectionEntity)
+
+    @Query("UPDATE invariant_collection SET revision = :revision WHERE id = 1")
+    suspend fun updateCollectionRevision(revision: Long)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRule(rule: InvariantRuleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun updateRule(rule: InvariantRuleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAudit(audit: InvariantAuditEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertSnapshot(snapshot: InvariantSnapshotEntity)
+
+    @Query("SELECT * FROM invariant_snapshots WHERE id = :id")
+    suspend fun readSnapshot(id: String): InvariantSnapshotEntity?
+
+    @Query("SELECT chatId FROM agent_run_index WHERE isNonterminal = 1 AND collectionRevision = :revision")
+    suspend fun affectedRunIds(revision: Long): List<String>
+
+    @Query("SELECT COUNT(*) FROM agent_run_index WHERE isNonterminal = 1 AND collectionRevision = :revision")
+    suspend fun countAffected(revision: Long): Int
+
+    @Query("UPDATE agent_run_index SET isStale = 1, isActive = 0, staleTarget = CASE WHEN isActive = 1 THEN 'ACTIVE' ELSE staleTarget END WHERE isNonterminal = 1 AND collectionRevision = :revision")
+    suspend fun markAffectedStale(revision: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRunIndex(index: AgentRunIndexEntity)
+
+    @Query("SELECT * FROM agent_run_index WHERE chatId = :chatId")
+    suspend fun readRunIndex(chatId: String): AgentRunIndexEntity?
+}
+
 internal data class ChatSummaryRow(val id: String, val title: String, val updatedAt: Long)
 
 @Database(
-    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class, AgentCheckpointEntity::class, AgentRecoveryEntity::class],
-    version = 4,
+    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class, AgentCheckpointEntity::class, AgentRecoveryEntity::class, InvariantCollectionEntity::class, InvariantRuleEntity::class, InvariantAuditEntity::class, InvariantSnapshotEntity::class, AgentRunIndexEntity::class],
+    version = 5,
     exportSchema = true,
 )
 internal abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun memoryDao(): MemoryDao
     abstract fun agentDao(): AgentDao
+    abstract fun invariantDao(): InvariantDao
 }
 
-class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage, AgentStorage {
+class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage, AgentStorage, InvariantStorage {
     override fun observeSummaries(): Flow<List<StoredChatSummary>> =
         database.chatDao().summaries().map { rows ->
             rows.map { StoredChatSummary(it.id, it.title, it.updatedAt) }
@@ -240,6 +331,68 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
         database.agentDao().deleteRecovery(chatId)
     }
 
+    override fun observeInvariantRules(): Flow<List<StoredInvariantRule>> =
+        database.invariantDao().observeCurrent().map { rows -> rows.map(InvariantRuleEntity::toStored) }
+
+    override suspend fun readInvariantRule(id: InvariantRuleId): StoredInvariantRule? =
+        database.invariantDao().readAny(id.value)?.takeIf { it.deletedAt == null }?.toStored()
+
+    override suspend fun readInvariantRulesIncludingDeleted(): List<StoredInvariantRule> =
+        database.invariantDao().readAll().map(InvariantRuleEntity::toStored)
+
+    override suspend fun invariantCollectionRevision(): CollectionRevision =
+        CollectionRevision(database.invariantDao().collectionRevision() ?: 0L)
+
+    override suspend fun countAffectedNonterminalRuns(collectionRevision: CollectionRevision): Int =
+        database.invariantDao().countAffected(collectionRevision.value)
+
+    override suspend fun commitInvariantMutation(mutation: StoredInvariantMutation): StoredInvariantCommitResult = try {
+        database.withTransaction {
+            val dao = database.invariantDao()
+            dao.initializeCollection(InvariantCollectionEntity(revision = 0))
+            val current = dao.collectionRevision() ?: 0L
+            if (current != mutation.expectedCollectionRevision.value) {
+                return@withTransaction StoredInvariantCommitResult.Rejected("STALE_COLLECTION", CollectionRevision(current))
+            }
+            val old = dao.readAny(mutation.ruleId.value)
+            if (mutation.operation != InvariantOperation.CREATE && (old == null || old.deletedAt != null)) {
+                return@withTransaction StoredInvariantCommitResult.Rejected("NOT_FOUND", CollectionRevision(current))
+            }
+            val expectedRuleRevision = mutation.expectedRuleRevision
+            if (expectedRuleRevision != null && old?.revision != expectedRuleRevision.value) {
+                return@withTransaction StoredInvariantCommitResult.Rejected("STALE_RULE", CollectionRevision(current), old?.revision?.let(::RuleRevision))
+            }
+            val nextRevision = current + 1
+            val next = when (mutation.operation) {
+                InvariantOperation.CREATE -> InvariantRuleEntity(mutation.ruleId.value, requireNotNull(mutation.title), requireNotNull(mutation.category).name, requireNotNull(mutation.statement), requireNotNull(mutation.enabled), 1, mutation.createdAt, mutation.createdAt)
+                InvariantOperation.EDIT -> old!!.copy(title = requireNotNull(mutation.title), category = requireNotNull(mutation.category).name, statement = requireNotNull(mutation.statement), enabled = requireNotNull(mutation.enabled), revision = old.revision + 1, updatedAt = mutation.createdAt)
+                InvariantOperation.ENABLE, InvariantOperation.DISABLE -> old!!.copy(enabled = requireNotNull(mutation.enabled), revision = old.revision + 1, updatedAt = mutation.createdAt)
+                InvariantOperation.DELETE -> old!!.copy(revision = old.revision + 1, updatedAt = mutation.createdAt, deletedAt = mutation.createdAt)
+            }
+            if (mutation.operation == InvariantOperation.CREATE) dao.insertRule(next) else dao.updateRule(next)
+            dao.updateCollectionRevision(nextRevision)
+            dao.insertAudit(InvariantAuditEntity(java.util.UUID.randomUUID().toString(), next.id, mutation.operation.name, old?.revision, next.revision, old?.digest(), next.digest(), nextRevision, mutation.createdAt))
+            val affected = dao.affectedRunIds(current).toSet()
+            dao.markAffectedStale(current)
+            StoredInvariantCommitResult.Committed(next.toStored().takeIf { it.deletedAt == null }, CollectionRevision(nextRevision), affected)
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        StoredInvariantCommitResult.Rejected("STORAGE", invariantCollectionRevision())
+    }
+
+    override suspend fun saveInvariantSnapshot(snapshot: StoredInvariantSnapshot): StorageResult = runStorage {
+        database.invariantDao().insertSnapshot(snapshot.toEntity())
+    }
+
+    override suspend fun readInvariantSnapshot(id: String): StoredInvariantSnapshot? = database.invariantDao().readSnapshot(id)?.toStored()
+
+    override suspend fun upsertAgentRunIndex(index: StoredAgentRunIndex): StorageResult = runStorage { database.invariantDao().upsertRunIndex(index.toEntity()) }
+    override suspend fun readAgentRunIndex(chatId: String): StoredAgentRunIndex? = database.invariantDao().readRunIndex(chatId)?.toStored()
+
+    internal fun closeForTesting() = database.close()
+
     private suspend fun runStorage(block: suspend () -> Unit): StorageResult = try {
         block()
         StorageResult.Success
@@ -262,7 +415,7 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
                 context.applicationContext,
                 AppDatabase::class.java,
                 databaseName,
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
     }
 }
 
@@ -319,6 +472,13 @@ private fun StoredAgentRecovery.toEntity() = AgentRecoveryEntity(
     taskGoal, taskConstraintsJson, taskDesiredResult, taskDecisionsJson,
     taskUpdatedAt, checkpointJson, updatedAt,
 )
+private fun InvariantRuleEntity.toStored() = StoredInvariantRule(InvariantRuleId(id), title, InvariantCategory.valueOf(category), statement, enabled, RuleRevision(revision), createdAt, updatedAt, deletedAt)
+private fun StoredInvariantSnapshot.toEntity() = InvariantSnapshotEntity(id, collectionRevision.value, payload, contentDigest, schemaVersion, createdAt)
+private fun InvariantSnapshotEntity.toStored() = StoredInvariantSnapshot(id, CollectionRevision(collectionRevision), payload, contentDigest, schemaVersion, createdAt)
+private fun StoredAgentRunIndex.toEntity() = AgentRunIndexEntity(chatId, runId, collectionRevision.value, isNonterminal, isActive, isStale, staleTarget, updatedAt)
+private fun AgentRunIndexEntity.toStored() = StoredAgentRunIndex(chatId, runId, CollectionRevision(collectionRevision), isNonterminal, isActive, isStale, staleTarget, updatedAt)
+private fun InvariantRuleEntity.digest(): String = listOf(id, title, category, statement, enabled, revision, deletedAt).joinToString("|").sha256()
+private fun String.sha256(): String = java.security.MessageDigest.getInstance("SHA-256").digest(toByteArray()).joinToString("") { "%02x".format(it) }
 
 internal val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -363,6 +523,25 @@ internal val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_checkpoints_chatId` ON `agent_checkpoints` (`chatId`)")
         db.execSQL("""CREATE TABLE IF NOT EXISTS `agent_recovery` (`chatId` TEXT NOT NULL, `isCanonicalChat` INTEGER NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `chatUpdatedAt` INTEGER NOT NULL, `contextJson` TEXT NOT NULL, `taskGoal` TEXT NOT NULL, `taskConstraintsJson` TEXT NOT NULL, `taskDesiredResult` TEXT NOT NULL, `taskDecisionsJson` TEXT NOT NULL, `taskUpdatedAt` INTEGER NOT NULL, `checkpointJson` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`chatId`))""")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_recovery_updatedAt` ON `agent_recovery` (`updatedAt`)")
+    }
+}
+
+internal val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `invariant_collection` (`id` INTEGER NOT NULL, `revision` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("INSERT OR IGNORE INTO `invariant_collection` (`id`, `revision`) VALUES (1, 0)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `invariant_rules` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `statement` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `revision` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deletedAt` INTEGER, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_rules_deletedAt_enabled_updatedAt_id` ON `invariant_rules` (`deletedAt`, `enabled`, `updatedAt`, `id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_rules_category_statement_deletedAt` ON `invariant_rules` (`category`, `statement`, `deletedAt`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `invariant_audit` (`eventId` TEXT NOT NULL, `ruleId` TEXT NOT NULL, `operation` TEXT NOT NULL, `oldRevision` INTEGER, `newRevision` INTEGER, `oldDigest` TEXT, `newDigest` TEXT, `collectionRevision` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`eventId`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_audit_ruleId` ON `invariant_audit` (`ruleId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_audit_collectionRevision` ON `invariant_audit` (`collectionRevision`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `invariant_snapshots` (`id` TEXT NOT NULL, `collectionRevision` INTEGER NOT NULL, `payload` TEXT NOT NULL, `contentDigest` TEXT NOT NULL, `schemaVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_snapshots_collectionRevision` ON `invariant_snapshots` (`collectionRevision`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_invariant_snapshots_contentDigest` ON `invariant_snapshots` (`contentDigest`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `agent_run_index` (`chatId` TEXT NOT NULL, `runId` TEXT NOT NULL, `collectionRevision` INTEGER NOT NULL, `isNonterminal` INTEGER NOT NULL, `isActive` INTEGER NOT NULL, `isStale` INTEGER NOT NULL, `staleTarget` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`chatId`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_run_index_isNonterminal_collectionRevision` ON `agent_run_index` (`isNonterminal`, `collectionRevision`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_run_index_runId` ON `agent_run_index` (`runId`)")
     }
 }
 
