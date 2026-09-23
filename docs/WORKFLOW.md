@@ -1,9 +1,48 @@
-# Машина состояний задач
+# Workflow задач
 
-Это протокол работы кодового ассистента с сохранением состояния на диске.
-Он не является фоновой автоматизацией Codex и сам не запускает агентов или тесты.
-Root обязан назначить реальный subagent и зарегистрировать это назначение до начала
-содержательной работы; скрипт контролирует порядок, отчёты и согласованность evidence.
+`task.ps1` сохраняет локальное состояние и является fail-closed consistency guard,
+не системой аутентификации. Он связывает scope, dispatch, отчёт и check, но не может
+доказать личность actor, его модель или смысловую истинность текста.
+
+## V3: новые задачи
+
+Новая задача создаётся с явным `-Mode small|standard`. В `small` один исполнитель,
+включая `root`, может выполнить scoped work и checks. `standard` требует независимый
+review для каждого work item; planner/UI/core роли добавляются только по реальной нужде.
+Перед работой пользователь одобряет `scope.json` (`scope`, `result`, `checks` —
+непустые массивы строк) через `approve-scope` с цитатой решения. SHA-256 считается по
+канонической JSON-форме, поэтому whitespace и порядок полей не меняют approval;
+изменение содержания этих полей требует нового approval. Narrative-файлы отдельны.
+
+```powershell
+./scripts/task.ps1 -Action new -Id TASK-001 -Title '...' -Mode small
+./scripts/task.ps1 -Action approve-scope -Id TASK-001 -Reason 'цитата и дата/сообщение'
+./scripts/task.ps1 -Action dispatch -Id TASK-001 -WorkItem chat -Phase IMPLEMENT -V3Role EXECUTOR -ActorId root
+./scripts/task.ps1 -Action complete-stage -Id TASK-001 -DispatchId '<guid>'
+./scripts/task.ps1 -Action record-check -Id TASK-001 -WorkItem chat -CheckId unit -Command '...' -Outcome PASS -Evidence 'фактический вывод'
+./scripts/task.ps1 -Action finish -Id TASK-001 -Reason 'результат'
+```
+
+`WorkItem` — безопасный slug; report автоматически получает отдельный путь
+`work-items/<item>/<dispatch-guid>.md`. Повтор item заменяет только такой же
+`(run, scope revision, item, phase)`, не evidence других item. Check принимается только
+с ID из `scope.json` и привязывается к hash текущего PASS IMPLEMENT; после исправления
+старый check не доказывает новый код. `finish` требует scope approval, PASS IMPLEMENT,
+все актуальные checks и, для `standard`, PASS REVIEW.
+
+Reviewer `standard` обязан отличаться от **всех** IMPLEMENT-авторов task/run/current
+scope, включая заменённые dispatch. `root` разрешён как executor, но self-review
+отклоняется. FAIL-review исправляется одним или несколькими IMPLEMENT dispatch с
+`-ReviewOf <review-guid>`; нет искусственного лимита microfix, но повторяются
+затронутые check/review. `accept` и `reopen` требуют явного решения пользователя;
+reopen создаёт новый run, сохраняя историю и старые FAIL/BLOCKED evidence.
+
+## Legacy V2: существующие задачи
+
+State без `mode` остаётся V2. Скрипт не повышает его до V3 при чтении и не придумывает
+прошлых approval, actor, PASS или completion. Используй совместимые V2-команды ниже.
+`reopen` из старого `ACCEPTED_WITH_ISSUES` сохраняет историю/evidence и возвращает
+задачу в PLANNING для нового честного evidence, не сбрасывая counters.
 
 | Этап | Роль | Условие выхода / артефакт |
 |---|---|---|
@@ -23,7 +62,7 @@ Root обязан назначить реальный subagent и зарегис
 Для изменений приложения без нужного SDK/эмулятора обязательное тестирование
 остаётся BLOCKED; наличие написанных тестов не означает, что они прошли.
 
-## Переходы и исправления
+## Переходы и исправления V2
 
 Root только координирует. До начала каждого содержательного этапа он вызывает
 `dispatch` с текущими stage, role, AgentId, model, reasoning и bounded scope;
@@ -52,7 +91,7 @@ coder текущего plan hash, включая invalidated rollback records, �
 - Один писатель на `state.json`; параллельные задачи используют разные каталоги.
 - Reviewer AgentId обязан отличаться от coder текущего cycle; self-review отклоняется и не может дать PASS.
 
-## Аппрув плана и лимит циклов
+## Аппрув плана и лимит циклов V2
 
 После подготовки specs.md и всех трёх planning evidence покажи план заказчику: объём, шаги, результат и проверки.
 Остановись до явного аппрува. `approve-plan` сохраняет SHA256 текущего specs.md и
@@ -87,7 +126,7 @@ CYCLE_DECISION и отклоняется. Агент обязан показат
 Команды решений — журналирование реального решения пользователя, не возможность
 агенту одобрить самого себя. Скрипт проверяет hash/лимит, но не подлинность цитаты.
 
-## Использование
+## Использование V2
 
 ```powershell
 ./scripts/task.ps1 -Action new -Id TASK-001 -Title 'Каркас Android-приложения'
@@ -111,4 +150,3 @@ ID, связанную user story, цель, вне scope, затронутые 
 состояния/ошибки, правила хранения, acceptance criteria, проверки, зависимости.
 Тест-кейс: ID → acceptance criterion → предусловия → шаги → ожидаемый результат
 → фактический результат → PASS/FAIL/BLOCKED → устройство/API/build → доказательство.
-
