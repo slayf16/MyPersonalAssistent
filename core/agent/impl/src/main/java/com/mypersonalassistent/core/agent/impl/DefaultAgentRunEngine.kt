@@ -23,7 +23,7 @@ import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.llm.api.Llm
 import com.mypersonalassistent.core.llm.api.LlmResult
 import com.mypersonalassistent.core.invariants.api.GateOutcome
-import com.mypersonalassistent.core.invariants.api.InvariantGateStage
+import com.mypersonalassistent.core.invariants.api.InvariantArtifactPurpose
 import com.mypersonalassistent.core.invariants.api.InvariantGuard
 import com.mypersonalassistent.core.invariants.api.InvariantRepository
 import com.mypersonalassistent.core.invariants.api.InvariantSnapshotRef
@@ -44,6 +44,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 
 internal class DefaultAgentRunEngine(
     private val llm: Llm,
@@ -77,7 +78,7 @@ internal class DefaultAgentRunEngine(
             is SnapshotResult.Available -> result.snapshot
             SnapshotResult.Unavailable -> return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
         }
-        if (snapshot != null) when (val outcome = gate(InvariantGateStage.REQUEST, snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
+        if (snapshot != null) when (val outcome = gate(InvariantArtifactPurpose.REQUEST, snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
             is GateOutcome.Rejected -> return AgentRunResult(refused(input, snapshot.ref(), outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal)
             GateOutcome.Unavailable -> return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
             is GateOutcome.Allowed -> Unit
@@ -199,7 +200,7 @@ internal class DefaultAgentRunEngine(
         if (repository.readSnapshot(prior) !is SnapshotResult.Available) return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
         val snapshot = repository.createSnapshot()
         if (snapshot !is SnapshotResult.Available) return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
-        when (val outcome = gate(InvariantGateStage.REQUEST, snapshot.snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
+        when (val outcome = gate(InvariantArtifactPurpose.REQUEST, snapshot.snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
             is GateOutcome.Rejected -> return AgentRunResult(refused(checkpoint.copy(invariantSnapshot = snapshot.snapshot.ref()), outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal)
             GateOutcome.Unavailable -> return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
             is GateOutcome.Allowed -> Unit
@@ -312,7 +313,7 @@ internal class DefaultAgentRunEngine(
                                 val snapshot = checkpoint.invariantSnapshot?.let { readSnapshot(it) }
                                 if (invariants != null && snapshot == null) return terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
                                 if (snapshot != null) {
-                                    when (val outcome = gate(InvariantGateStage.PLAN, snapshot, event.steps.joinToString("\n") { it.title + "|" + it.successCriterion })) {
+                                    when (val outcome = gate(InvariantArtifactPurpose.PLAN, snapshot, event.steps.joinToString("\n") { it.title + "|" + it.successCriterion })) {
                                         is GateOutcome.Rejected -> return AgentRunResult(refused(checkpoint, outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal).also { publish(it.checkpoint) }
                                         GateOutcome.Unavailable -> return failure(checkpoint, AgentFailureKind.CONTEXT).also { publish(it.checkpoint) }
                                         is GateOutcome.Allowed -> Unit
@@ -360,7 +361,7 @@ internal class DefaultAgentRunEngine(
                                 }
                                 val snapshot = checkpoint.invariantSnapshot?.let { readSnapshot(it) }
                                 if (invariants != null && snapshot == null) return terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
-                                if (snapshot != null) when (val outcome = gate(InvariantGateStage.STEP, snapshot, event.artifact)) {
+                                if (snapshot != null) when (val outcome = gate(InvariantArtifactPurpose.STEP, snapshot, event.artifact)) {
                                     is GateOutcome.Rejected -> return AgentRunResult(refused(checkpoint, outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal).also { publish(it.checkpoint) }
                                     GateOutcome.Unavailable -> return failure(checkpoint, AgentFailureKind.CONTEXT).also { publish(it.checkpoint) }
                                     is GateOutcome.Allowed -> Unit
@@ -394,7 +395,7 @@ internal class DefaultAgentRunEngine(
                                 providerRejection(checkpoint, AgentEvent.VALIDATION_PASS)?.let { return it.also { result -> publish(result.checkpoint) } }
                                 val snapshot = checkpoint.invariantSnapshot?.let { readSnapshot(it) }
                                 if (invariants != null && snapshot == null) return terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
-                                if (snapshot != null) when (val outcome = gate(InvariantGateStage.FINAL, snapshot, checkpoint.candidateResult)) {
+                                if (snapshot != null) when (val outcome = gate(InvariantArtifactPurpose.FINAL, snapshot, checkpoint.candidateResult)) {
                                     is GateOutcome.Rejected -> return AgentRunResult(refused(checkpoint, outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal).also { publish(it.checkpoint) }
                                     GateOutcome.Unavailable -> return failure(checkpoint, AgentFailureKind.CONTEXT).also { publish(it.checkpoint) }
                                     is GateOutcome.Allowed -> Unit
@@ -527,9 +528,23 @@ internal class DefaultAgentRunEngine(
     private fun canSpendExtra(checkpoint: AgentCheckpoint) = checkpoint.extraAttemptsUsed < MAX_EXTRA_ATTEMPTS_PER_RUN && checkpoint.providerCallsUsed < MAX_PROVIDER_CALLS_PER_RUN
 
     private fun phaseInstruction(checkpoint: AgentCheckpoint): String = when (checkpoint.phase) {
-        AgentPhase.PLANNING -> "Return JSON v1 for runId=${checkpoint.runId}, revision=${checkpoint.revision}: PLAN_READY (1..3 steps) or NEEDS_USER."
-        AgentPhase.EXECUTION -> if (checkpoint.revisionPending) "Return JSON v1 REVISED_RESULT for runId=${checkpoint.runId}, revision=${checkpoint.revision}; revise only listed issues." else "Return JSON v1 STEP_RESULT for stepId=${checkpoint.plan[checkpoint.currentStepIndex].id}, runId=${checkpoint.runId}, revision=${checkpoint.revision}."
-        AgentPhase.VALIDATION -> "Return JSON v1 PASS or REVISE (1..5 issues) for runId=${checkpoint.runId}, revision=${checkpoint.revision}."
+        AgentPhase.PLANNING -> """
+            Return exactly one JSON object: no Markdown and no additional fields. Every response must contain schemaVersion=1, runId=${checkpoint.runId}, and revision=${checkpoint.revision}; the whole object is at most 16384 code points.
+            Return PLAN_READY with 1..3 steps, each {"id":"nonblank, max 36 code points","title":"nonblank, max 120 code points","successCriterion":"nonblank, max 300 code points"}: {"schemaVersion":1,"kind":"PLAN_READY","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"steps":[...]}
+            Or return NEEDS_USER: {"schemaVersion":1,"kind":"NEEDS_USER","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"question":"nonblank, max 500 code points","expectedInput":"nonblank, max 240 code points"}.
+        """.trimIndent()
+        AgentPhase.EXECUTION -> if (checkpoint.revisionPending) """
+            Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
+            Return only {"schemaVersion":1,"kind":"REVISED_RESULT","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"artifact":"nonblank, max 8000 code points","summary":"nonblank, max 1000 code points"}; revise only listed issues.
+        """.trimIndent() else """
+            Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
+            Return only {"schemaVersion":1,"kind":"STEP_RESULT","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"stepId":${JsonPrimitive(checkpoint.plan[checkpoint.currentStepIndex].id)},"artifact":"nonblank, max 8000 code points","summary":"nonblank, max 1000 code points"}.
+        """.trimIndent()
+        AgentPhase.VALIDATION -> """
+            Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
+            Return PASS only as {"schemaVersion":1,"kind":"PASS","runId":"${checkpoint.runId}","revision":${checkpoint.revision}}.
+            Or return REVISE only as {"schemaVersion":1,"kind":"REVISE","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"issues":["nonblank, max 400 code points"]}, with 1..5 issues.
+        """.trimIndent()
         AgentPhase.INTAKE, AgentPhase.DONE -> "No provider call is allowed."
     }
 
@@ -604,7 +619,7 @@ internal class DefaultAgentRunEngine(
         if (repository.collectionRevision() == ref.collectionRevision) return null
         val fresh = repository.createSnapshot()
         if (fresh !is SnapshotResult.Available) return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
-        when (val outcome = gate(InvariantGateStage.REQUEST, fresh.snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
+        when (val outcome = gate(InvariantArtifactPurpose.REQUEST, fresh.snapshot, input.messages.lastOrNull()?.content.orEmpty())) {
             is GateOutcome.Rejected -> return AgentRunResult(refused(checkpoint.copy(invariantSnapshot = fresh.snapshot.ref()), outcome.refusal), failure = AgentFailureKind.WORKFLOW, refusal = outcome.refusal)
             GateOutcome.Unavailable -> return AgentRunResult(terminalInvariantFailure(input), failure = AgentFailureKind.CONTEXT)
             is GateOutcome.Allowed -> Unit
@@ -618,7 +633,7 @@ internal class DefaultAgentRunEngine(
         approvedPlanRevision = null, approvedAt = null, invariantSnapshot = snapshot, staleTarget = ResumeTarget.NONE,
         operationToken = AgentOperationToken(0), planChange = null, revision = revision, updatedAt = clock(), expectedAction = WAIT,
     )
-    private suspend fun gate(stage: InvariantGateStage, snapshot: com.mypersonalassistent.core.invariants.api.InvariantSnapshot, artifact: String): GateOutcome = when (val result = guard?.check(stage, snapshot, artifact)) {
+    private suspend fun gate(purpose: InvariantArtifactPurpose, snapshot: com.mypersonalassistent.core.invariants.api.InvariantSnapshot, artifact: String): GateOutcome = when (val result = guard?.check(purpose, snapshot, artifact)) {
         null -> GateOutcome.Allowed(snapshot.ref(), digest(artifact))
         is GateOutcome.Allowed -> if (result.snapshotRef == snapshot.ref() && result.artifactDigest == digest(artifact)) result else GateOutcome.Unavailable
         is GateOutcome.Rejected -> result
