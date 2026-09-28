@@ -145,7 +145,12 @@ sealed interface SnapshotResult {
     data object Unavailable : SnapshotResult
 }
 
-enum class InvariantGateStage { REQUEST, PLAN, STEP, FINAL }
+/** Identifies the object being checked; rules are evaluated only where they apply. */
+enum class InvariantArtifactPurpose { REQUEST, PLAN, STEP, FINAL }
+
+/** Kept for source compatibility with existing guard consumers and fakes. */
+@Deprecated("Use InvariantArtifactPurpose")
+typealias InvariantGateStage = InvariantArtifactPurpose
 
 /**
  * The complete outcome of exactly one guard invocation.  It is deliberately local to
@@ -161,9 +166,19 @@ sealed interface GateOutcome {
 typealias InvariantGateResult = GateOutcome
 data class SafeInvariantRefusal(val title: String?, val category: InvariantCategory?, val ruleId: InvariantRuleId?, val explanation: String)
 sealed interface SemanticGuardResult { data object Allowed : SemanticGuardResult; data class Conflict(val refusal: SafeInvariantRefusal) : SemanticGuardResult; data object Unavailable : SemanticGuardResult }
-interface InvariantSemanticPort { suspend fun evaluate(stage: InvariantGateStage, snapshot: InvariantSnapshot, artifact: String): SemanticGuardResult }
+interface InvariantSemanticPort {
+    suspend fun evaluate(
+        purpose: InvariantArtifactPurpose,
+        snapshot: InvariantSnapshot,
+        artifact: String,
+    ): SemanticGuardResult
+}
 
 /** A guard is fail-closed: an unavailable result is never equivalent to Allowed. */
 interface InvariantGuard {
-    suspend fun check(stage: InvariantGateStage, snapshot: InvariantSnapshot, artifact: String): GateOutcome
+    suspend fun check(
+        purpose: InvariantArtifactPurpose,
+        snapshot: InvariantSnapshot,
+        artifact: String,
+    ): GateOutcome
 }

@@ -5,6 +5,7 @@ import com.arkivanov.mvikotlin.core.store.Store
 import com.arkivanov.mvikotlin.core.store.StoreFactory
 import com.arkivanov.mvikotlin.extensions.coroutines.CoroutineExecutor
 import com.mypersonalassistent.core.agent.api.AgentCheckpoint
+import com.mypersonalassistent.core.agent.api.AgentFailureKind
 import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.core.agent.api.AgentRunInput
 import com.mypersonalassistent.core.agent.api.AgentRunResult
@@ -275,7 +276,9 @@ internal class ChatStoreFactory(
                 )
             }
             if (persistResult) engine.persist(AgentRunInput(id, visible, updatedTask, result.checkpoint))
-            if (result.failure != null) publish(ChatEffect.TechnicalError)
+            val expectedRefusal = result.failure == AgentFailureKind.WORKFLOW &&
+                result.checkpoint.runStatus == AgentRunStatus.REFUSED
+            if (result.failure != null && !expectedRefusal) publish(ChatEffect.TechnicalError)
         }
 
         private fun startNewTask() {

@@ -10,7 +10,7 @@ import com.mypersonalassistent.core.invariants.api.CollectionRevision
 import com.mypersonalassistent.core.invariants.api.ConfirmMutationResult
 import com.mypersonalassistent.core.invariants.api.InvariantChange
 import com.mypersonalassistent.core.invariants.api.GateOutcome
-import com.mypersonalassistent.core.invariants.api.InvariantGateStage
+import com.mypersonalassistent.core.invariants.api.InvariantArtifactPurpose
 import com.mypersonalassistent.core.invariants.api.InvariantGuard
 import com.mypersonalassistent.core.invariants.api.InvariantSemanticPort
 import com.mypersonalassistent.core.invariants.api.SemanticGuardResult
@@ -204,9 +204,9 @@ class DefaultInvariantRepository(
 
 /** Deterministic guard evaluates user-owned snapshot rules only; it has no hidden policy list. */
 class DeterministicInvariantGuard(private val semantic: InvariantSemanticPort = object : InvariantSemanticPort {
-    override suspend fun evaluate(stage: InvariantGateStage, snapshot: InvariantSnapshot, artifact: String) = SemanticGuardResult.Unavailable
+    override suspend fun evaluate(purpose: InvariantArtifactPurpose, snapshot: InvariantSnapshot, artifact: String) = SemanticGuardResult.Unavailable
 }) : InvariantGuard {
-    override suspend fun check(stage: InvariantGateStage, snapshot: InvariantSnapshot, artifact: String): GateOutcome {
+    override suspend fun check(purpose: InvariantArtifactPurpose, snapshot: InvariantSnapshot, artifact: String): GateOutcome {
         snapshot.entries.forEach { entry ->
             val forbidden = entry.forbiddenTerms()
             if (forbidden.any { term -> artifact.contains(term, ignoreCase = true) }) {
@@ -214,7 +214,7 @@ class DeterministicInvariantGuard(private val semantic: InvariantSemanticPort = 
             }
         }
         if (snapshot.entries.isNotEmpty()) when (val result = try {
-            semantic.evaluate(stage, snapshot, artifact)
+            semantic.evaluate(purpose, snapshot, artifact)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) { SemanticGuardResult.Unavailable }) {
