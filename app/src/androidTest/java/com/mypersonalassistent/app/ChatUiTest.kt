@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mypersonalassistent.core.history.api.ChatMessage
@@ -29,6 +30,12 @@ import com.mypersonalassistent.core.history.api.MessageRole
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import com.mypersonalassistent.feature.chat.api.ChatState
 import com.mypersonalassistent.feature.chat.impl.ChatScreen
+import com.mypersonalassistent.core.mcp.api.McpPermission
+import com.mypersonalassistent.core.agent.api.AgentCheckpoint
+import com.mypersonalassistent.core.agent.api.AgentPhase
+import com.mypersonalassistent.core.agent.api.AgentRunStatus
+import com.mypersonalassistent.core.agent.api.McpCallStatus
+import com.mypersonalassistent.core.agent.api.PendingMcpCall
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import org.junit.Assert.assertEquals
@@ -99,6 +106,80 @@ class ChatUiTest {
         composeRule.runOnIdle { assertEquals(ChatIntent.CloseDialog, fixture.intents.last()) }
     }
 
+    @Test fun mcpSelectorTogglesOnlyTheChosenServer() {
+        val state = MutableStateFlow(ChatState("ui-chat", mcpSelectorOpen = true, mcpPermissions = listOf(McpPermission("server", false, "Research MCP"))))
+        val intents = mutableListOf<ChatIntent>()
+        composeRule.setContent { MaterialTheme { ChatScreen(state) { intents += it } } }
+
+        composeRule.onNodeWithContentDescription("Research MCP: выключен").performClick()
+        composeRule.runOnIdle { assertEquals(ChatIntent.SetMcpPermission("server", true), intents.single()) }
+    }
+
+    @Test fun mcpSelectorScrollsThroughMaximumTenServers() {
+        val permissions = (1..10).map { McpPermission("server-$it", false, "Server $it") }
+        val state = MutableStateFlow(ChatState("ui-chat", mcpSelectorOpen = true, mcpPermissions = permissions))
+        composeRule.setContent { MaterialTheme { ChatScreen(state) {} } }
+
+        composeRule.onNodeWithContentDescription("Server 10: выключен").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun mcpApprovalSheetRequiresExplicitAllowOrDeny() {
+        val pending = PendingMcpCall("server", "lookup", "call-1", "{\"q\":\"safe\"}", "digest-1", McpCallStatus.WAITING_CONFIRMATION)
+        val state = MutableStateFlow(ChatState("ui-chat", checkpoint = AgentCheckpoint("ui-chat", "run", phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.WAITING_MCP_APPROVAL, pendingMcpCalls = listOf(pending))))
+        val intents = mutableListOf<ChatIntent>()
+        composeRule.setContent { MaterialTheme { ChatScreen(state) { intents += it } } }
+
+        composeRule.onNodeWithText("Подтвердить вызов MCP").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Разрешить вызов MCP").performClick()
+        composeRule.runOnIdle { assertEquals(ChatIntent.DecideMcpCall("digest-1", true), intents.single()) }
+    }
+
+    @Test fun mcpApprovalBottomSheetKeepsLongMaskedArgumentsScrollableAndActionsVisible() {
+        val secret = "raw-password-must-not-render"
+        val display = "{\"password\":\"••••\",\"payload\":\"${"x".repeat(3000)}\"}"
+        val pending = PendingMcpCall(
+            "server", "long-tool", "call-long", "{\"password\":\"$secret\"}", "digest-long",
+            McpCallStatus.WAITING_CONFIRMATION,
+            displayArguments = display,
+        )
+        val state = MutableStateFlow(ChatState("ui-chat", checkpoint = AgentCheckpoint("ui-chat", "run", phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.WAITING_MCP_APPROVAL, pendingMcpCalls = listOf(pending))))
+        composeRule.setContent { MaterialTheme { ChatScreen(state) {} } }
+
+        composeRule.onNodeWithContentDescription("Маскированные аргументы MCP").assertIsDisplayed()
+        composeRule.onNodeWithText(secret).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Отклонить вызов MCP").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Разрешить вызов MCP").assertIsDisplayed()
+    }
+
+    @Test fun dismissingMcpApprovalDeniesAndSuppressedRunNeedsExplicitReenable() {
+        val pending = PendingMcpCall("server", "lookup", "call-1", "{}", "digest-2", McpCallStatus.WAITING_CONFIRMATION)
+        val state = MutableStateFlow(ChatState("ui-chat", checkpoint = AgentCheckpoint("ui-chat", "run", phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.WAITING_MCP_APPROVAL, pendingMcpCalls = listOf(pending))))
+        val intents = mutableListOf<ChatIntent>()
+        composeRule.setContent { MaterialTheme { ChatScreen(state) { intents += it } } }
+        composeRule.onNodeWithText("Отклонить").performClick()
+        composeRule.runOnIdle { assertEquals(ChatIntent.DecideMcpCall("digest-2", false), intents.single()) }
+
+        intents.clear()
+        composeRule.runOnIdle { state.value = ChatState("ui-chat", checkpoint = AgentCheckpoint("ui-chat", "run", phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.ACTIVE, mcpSuppressed = true)) }
+        composeRule.onNodeWithContentDescription("Снова разрешить MCP").performClick()
+        composeRule.runOnIdle { assertEquals(ChatIntent.ReenableMcp, intents.single()) }
+    }
+
+    @Test fun unknownExternalOutcomeIsVisibleBeforeASeparateNewApproval() {
+        val pending = PendingMcpCall("server", "lookup", "fresh-call", "{}", "fresh-digest", McpCallStatus.WAITING_CONFIRMATION)
+        val state = MutableStateFlow(ChatState("ui-chat", checkpoint = AgentCheckpoint(
+            "ui-chat", "run", phase = AgentPhase.EXECUTION,
+            runStatus = AgentRunStatus.WAITING_MCP_APPROVAL,
+            pendingMcpCalls = listOf(pending),
+            mcpOutcomeUnknown = true,
+        )))
+        composeRule.setContent { MaterialTheme { ChatScreen(state) {} } }
+
+        composeRule.onNodeWithText("Предыдущее действие MCP могло выполниться").assertIsDisplayed()
+        composeRule.onNodeWithText("Предыдущее внешнее действие могло выполниться. Новый вызов требует отдельного подтверждения.").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Разрешить вызов MCP").assertIsDisplayed()
+    }
+
     private fun dispatchBackAndAwait(fixture: ChatFixture, expected: ChatIntent) {
         composeRule.waitForIdle()
         composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
@@ -145,6 +226,7 @@ class ChatUiTest {
                 is ChatIntent.ChangeTaskDecisions -> state.update { it.copy(taskDraft = it.taskDraft.copy(decisions = intent.value)) }
                 ChatIntent.ApplyTaskMemory -> state.update { it.copy(taskEditorOpen = false) }
                 ChatIntent.ConfirmSave, ChatIntent.Discard, ChatIntent.Load -> Unit
+                else -> Unit
             }
         }
 
@@ -154,7 +236,7 @@ class ChatUiTest {
                 it.copy(
                     messages = it.messages.filterNot { message -> message.id == user.id },
                     draft = user.content,
-                    sending = false,
+                    checkpoint = null,
                 )
             }
             technicalErrorCount.update { it + 1 }
@@ -162,7 +244,7 @@ class ChatUiTest {
 
         private fun beginFakeRequest() {
             val before = state.value
-            if (before.sending || before.draft.isBlank()) return
+            if (!before.composerEditable || before.draft.isBlank()) return
             sendCount += 1
             state.value = before.copy(
                 messages = before.messages + ChatMessage(
@@ -171,7 +253,7 @@ class ChatUiTest {
                     content = before.draft,
                 ),
                 draft = "",
-                sending = true,
+                checkpoint = AgentCheckpoint("ui-chat", "pending-$sendCount", phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.ACTIVE, inFlight = true),
             )
         }
     }

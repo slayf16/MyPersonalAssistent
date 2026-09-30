@@ -21,7 +21,15 @@ import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.llm.api.Llm
+import com.mypersonalassistent.core.llm.api.LlmError
 import com.mypersonalassistent.core.llm.api.LlmResult
+import com.mypersonalassistent.core.llm.api.LlmToolDefinition
+import com.mypersonalassistent.core.llm.api.LlmToolCall
+import com.mypersonalassistent.core.llm.api.LlmToolExchange
+import com.mypersonalassistent.core.agent.api.PendingMcpCall
+import com.mypersonalassistent.core.agent.api.McpCallStatus
+import com.mypersonalassistent.core.agent.api.CompletedMcpCall
+import com.mypersonalassistent.core.mcp.api.McpToolGateway
 import com.mypersonalassistent.core.invariants.api.GateOutcome
 import com.mypersonalassistent.core.invariants.api.InvariantArtifactPurpose
 import com.mypersonalassistent.core.invariants.api.InvariantGuard
@@ -42,8 +50,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 internal class DefaultAgentRunEngine(
@@ -51,6 +63,7 @@ internal class DefaultAgentRunEngine(
     private val composer: AgentRequestComposer,
     private val history: HistoryRepository,
     private val recovery: AgentRecoveryRepository,
+    private val mcp: McpToolGateway? = null,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val json: Json = Json { ignoreUnknownKeys = false },
     private val invariants: InvariantRepository? = null,
@@ -161,6 +174,8 @@ internal class DefaultAgentRunEngine(
             runStatus = AgentRunStatus.ACTIVE,
             retryAllowed = false,
             failureKind = null,
+            providerError = null,
+            providerHttpStatus = null,
             extraAttemptsUsed = checkpoint.extraAttemptsUsed + 1,
             expectedAction = WAIT,
             revision = checkpoint.revision + 1,
@@ -236,8 +251,96 @@ internal class DefaultAgentRunEngine(
         }
     }
 
+    override suspend fun decideMcpCall(input: AgentRunInput, digest: String, allow: Boolean): AgentRunResult = commandLane.withLock {
+        val current = currentCheckpoint(input) ?: return AgentRunResult(
+            checkpoint.value?.takeIf { it.chatId == input.chatId && it.runId == input.checkpoint?.runId }
+                ?: requireNotNull(input.checkpoint),
+        )
+        val head = current.pendingMcpCalls.firstOrNull { it.status == McpCallStatus.WAITING_CONFIRMATION }
+            ?: return AgentRunResult(current)
+        if (current.runStatus != AgentRunStatus.WAITING_MCP_APPROVAL || head.digest != digest) return AgentRunResult(current)
+        if (current.completedMcpCalls.size + current.pendingMcpCalls.size > MAX_MCP_TRANSCRIPT_CALLS) {
+            return terminalWorkflow(current)
+        }
+        if (!allow) {
+            val denied = current.pendingMcpCalls.filter { it.status == McpCallStatus.WAITING_CONFIRMATION }
+            val next = current.copy(
+                runStatus = AgentRunStatus.ACTIVE,
+                mcpSuppressed = true,
+                pendingMcpCalls = emptyList(),
+                completedMcpCalls = current.completedMcpCalls + denied.map { it.localResult(MCP_DENIED, true) },
+                expectedAction = MCP_SUPPRESSED,
+                operationToken = nextToken(current.chatId), revision = current.revision + 1, updatedAt = clock(),
+            )
+            latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = next)) }
+            return advance(input.copy(checkpoint = next), next)
+        }
+        if (current.approvedMcpCalls >= MAX_APPROVED_MCP_CALLS || mcp == null) {
+            val unavailable = current.pendingMcpCalls.filter { it.status == McpCallStatus.WAITING_CONFIRMATION }
+            val limited = current.copy(
+                runStatus = AgentRunStatus.ACTIVE,
+                inFlight = false,
+                mcpSuppressed = true,
+                pendingMcpCalls = emptyList(),
+                completedMcpCalls = current.completedMcpCalls + unavailable.map { it.localResult(MCP_LIMIT, true) },
+                expectedAction = MCP_SUPPRESSED,
+                operationToken = nextToken(current.chatId),
+                revision = current.revision + 1,
+                updatedAt = clock(),
+            )
+            latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = limited)) }
+            return advance(input.copy(checkpoint = limited), limited)
+        }
+        val inFlight = current.copy(runStatus = AgentRunStatus.ACTIVE, pendingMcpCalls = current.pendingMcpCalls.map { if (it.toolCallId == head.toolCallId) head.copy(status = McpCallStatus.IN_FLIGHT) else it }, approvedMcpCalls = current.approvedMcpCalls + 1, inFlight = true, operationToken = nextToken(current.chatId), revision = current.revision + 1, updatedAt = clock())
+        latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = inFlight)) }
+        val result = try { mcp.call(com.mypersonalassistent.core.mcp.api.McpToolCall(com.mypersonalassistent.core.mcp.api.McpToolId(head.serverId, head.toolName), json.parseToJsonElement(head.canonicalArguments), head.toolCallId)) } catch (cancelled: CancellationException) { throw cancelled }
+        val completed = when (result) {
+            is com.mypersonalassistent.core.mcp.api.McpResult.Success -> {
+                val nextPending = inFlight.pendingMcpCalls.filterNot { it.toolCallId == head.toolCallId }
+                inFlight.copy(
+                    inFlight = false,
+                    runStatus = if (nextPending.isNotEmpty()) AgentRunStatus.WAITING_MCP_APPROVAL else AgentRunStatus.ACTIVE,
+                    pendingMcpCalls = nextPending,
+                    completedMcpCalls = inFlight.completedMcpCalls + head.localResult(result.value.text, result.value.isError, result.value.structuredContent),
+                    expectedAction = if (nextPending.isNotEmpty()) MCP_APPROVE else WAIT,
+                    revision = inFlight.revision + 1, updatedAt = clock(),
+                )
+            }
+            is com.mypersonalassistent.core.mcp.api.McpResult.Failure -> {
+                val failed = inFlight.pendingMcpCalls.filter { it.status != McpCallStatus.COMPLETED }
+                inFlight.copy(inFlight = false, mcpSuppressed = true, pendingMcpCalls = emptyList(), completedMcpCalls = inFlight.completedMcpCalls + failed.map { it.localResult(MCP_UNAVAILABLE, true) }, expectedAction = MCP_SUPPRESSED, revision = inFlight.revision + 1, updatedAt = clock())
+            }
+        }
+        latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = completed)) }
+        if (completed.runStatus == AgentRunStatus.WAITING_MCP_APPROVAL) AgentRunResult(completed) else advance(input.copy(checkpoint = completed), completed)
+    }
+
+    override suspend fun interruptMcp(input: AgentRunInput): AgentRunResult = commandLane.withLock {
+        // Revocation is deliberately allowed to follow an already-rendered checkpoint: approving
+        // a tool call advances its token before the gateway returns, while the UI still holds the
+        // waiting checkpoint.  Use only the engine-owned checkpoint for that same run so a stale
+        // UI copy cannot restore or mutate a different run, then fail closed below.
+        val current = checkpoint.value?.takeIf {
+            it.chatId == input.chatId && it.runId == input.checkpoint?.runId
+        } ?: currentCheckpoint(input) ?: return AgentRunResult(requireNotNull(input.checkpoint))
+        val unknown = current.pendingMcpCalls.filter { it.status == McpCallStatus.IN_FLIGHT }.map { it.localResult(MCP_OUTCOME_UNKNOWN, true) }
+        val denied = current.pendingMcpCalls.filter { it.status == McpCallStatus.WAITING_CONFIRMATION }.map { it.localResult(MCP_DENIED, true) }
+        val normalized = current.copy(mcpSuppressed = true, pendingMcpCalls = emptyList(), completedMcpCalls = current.completedMcpCalls + unknown + denied, mcpOutcomeUnknown = current.mcpOutcomeUnknown || unknown.isNotEmpty(), runStatus = AgentRunStatus.ACTIVE, inFlight = false, expectedAction = CONTINUE, operationToken = nextToken(current.chatId), revision = current.revision + 1, updatedAt = clock())
+        latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = normalized)) }
+        AgentRunResult(normalized)
+    }
+
+    override suspend fun reenableMcp(input: AgentRunInput): AgentRunResult = commandLane.withLock {
+        val current = currentCheckpoint(input) ?: return AgentRunResult(requireNotNull(input.checkpoint))
+        if (!current.mcpSuppressed || current.inFlight) return AgentRunResult(current)
+        val resumed = current.copy(mcpSuppressed = false, expectedAction = CONTINUE, operationToken = nextToken(current.chatId), revision = current.revision + 1, updatedAt = clock())
+        latestInputs[input.chatId]?.let { persist(it.copy(checkpoint = resumed)) }
+        AgentRunResult(resumed)
+    }
+
     override suspend fun persist(input: AgentRunInput) {
         val checkpoint = requireNotNull(input.checkpoint)
+        validateCheckpoint(checkpoint)
         latestInputs[input.chatId] = input
         validateRecoveryInput(input)
         val now = clock()
@@ -270,15 +373,33 @@ internal class DefaultAgentRunEngine(
     override suspend fun discardRecovery(chatId: String): Boolean = recovery.discardRecovery(chatId)
 
     override fun decodeCheckpoint(payload: String): AgentCheckpoint? = try {
-        decode(payload)
+        require(payload.toByteArray().size <= MAX_CHECKPOINT_BYTES)
+        decode(payload).normalizeRecoveredMcp()
     } catch (_: Throwable) {
         null
+    }
+
+    /** A process cannot know whether an interrupted network call reached the server. */
+    private fun AgentCheckpoint.normalizeRecoveredMcp(): AgentCheckpoint {
+        val unknown = pendingMcpCalls.filter { it.status == McpCallStatus.IN_FLIGHT }
+        if (unknown.isEmpty()) return this
+        return copy(
+            runStatus = AgentRunStatus.ACTIVE,
+            inFlight = false,
+            mcpSuppressed = true,
+            pendingMcpCalls = pendingMcpCalls.filterNot { it.status == McpCallStatus.IN_FLIGHT },
+            completedMcpCalls = completedMcpCalls + unknown.map { it.localResult(MCP_OUTCOME_UNKNOWN, true) },
+            mcpOutcomeUnknown = true,
+            expectedAction = MCP_SUPPRESSED,
+            revision = revision + 1,
+            operationToken = AgentOperationToken(operationToken.value + 1),
+        )
     }
 
     private suspend fun advance(input: AgentRunInput, initial: AgentCheckpoint): AgentRunResult {
         var checkpoint = initial.copy(operationToken = nextToken(initial.chatId))
         while (checkpoint.runStatus == AgentRunStatus.ACTIVE) {
-            val request = try {
+            var request = try {
                 val invariantSnapshot = checkpoint.invariantSnapshot?.let { readSnapshot(it) }
                 if (invariants != null && invariantSnapshot == null) return terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
                 if (invariantSnapshot == null) composer.composeForTask(
@@ -297,14 +418,98 @@ internal class DefaultAgentRunEngine(
             } catch (_: Throwable) {
                 return failure(checkpoint, AgentFailureKind.CONTEXT).also { publish(it.checkpoint) }
             }
+            var exposedTools = emptyMap<String, com.mypersonalassistent.core.mcp.api.McpToolDefinition>()
+            if (!checkpoint.mcpSuppressed && checkpoint.approvedMcpCalls < MAX_APPROVED_MCP_CALLS && mcp != null) {
+                val discovered = mcp.tools(input.chatId)
+                if (discovered is com.mypersonalassistent.core.mcp.api.McpResult.Success) {
+                    exposedTools = discovered.value.associateBy { tool -> providerToolName(tool.id.serverId, tool.id.name) }
+                    if (exposedTools.size != discovered.value.size) return failure(checkpoint, AgentFailureKind.SCHEMA).also { publish(it.checkpoint) }
+                    request = request.copy(tools = exposedTools.map { (providerName, tool) -> LlmToolDefinition(providerName, tool.description, tool.inputSchema) })
+                } else {
+                    checkpoint = checkpoint.copy(mcpSuppressed = true, expectedAction = MCP_SUPPRESSED, revision = checkpoint.revision + 1, updatedAt = clock())
+                }
+            }
+            if (checkpoint.completedMcpCalls.isNotEmpty()) request = request.copy(toolExchanges = checkpoint.completedMcpCalls.map { it.toExchange() })
             val prepared = prepareProviderCall(checkpoint)
             if (prepared == null) return terminalBudget(checkpoint).also { publish(it.checkpoint) }
             checkpoint = prepared
             try {
                 persist(input.copy(checkpoint = checkpoint))
                 when (val provider = llm.execute(request)) {
-                    is LlmResult.Failure -> return failure(checkpoint, AgentFailureKind.PROVIDER).also { publish(it.checkpoint) }
+                    is LlmResult.Failure -> return failure(
+                        checkpoint = checkpoint,
+                        kind = AgentFailureKind.PROVIDER,
+                        providerError = provider.error,
+                        providerHttpStatus = provider.httpStatus,
+                    ).also { publish(it.checkpoint) }
                     is LlmResult.Success -> {
+                        if (provider.toolCalls.isNotEmpty()) {
+                            if (checkpoint.mcpSuppressed || provider.toolCalls.size > MAX_PENDING_MCP_CALLS) return failure(checkpoint, AgentFailureKind.WORKFLOW).also { publish(it.checkpoint) }
+                            val pending = mutableListOf<PendingMcpCall>()
+                            var proposalFailure: com.mypersonalassistent.core.mcp.api.McpError? = null
+                            for (call in provider.toolCalls) {
+                                val tool = exposedTools[call.name]
+                                val canonical = canonicalJson(call.arguments)
+                                if (tool == null || canonical.toByteArray().size > 64 * 1024) {
+                                    proposalFailure = com.mypersonalassistent.core.mcp.api.McpError.INVALID_ARGUMENTS
+                                    break
+                                }
+                                when (val preparedCall = requireNotNull(mcp).prepareCall(com.mypersonalassistent.core.mcp.api.McpToolCall(tool.id, call.arguments, call.id))) {
+                                    is com.mypersonalassistent.core.mcp.api.McpResult.Success -> pending += PendingMcpCall(
+                                        tool.id.serverId, tool.id.name, call.id, canonical,
+                                        digest(tool.id.serverId, tool.id.name, canonical, checkpoint.revision, call.id),
+                                        McpCallStatus.WAITING_CONFIRMATION,
+                                        preparedCall.value.maskedDisplayArguments,
+                                    )
+                                    is com.mypersonalassistent.core.mcp.api.McpResult.Failure -> {
+                                        proposalFailure = preparedCall.error
+                                        break
+                                    }
+                                }
+                            }
+                            if (proposalFailure != null) {
+                                val safeFailures = provider.toolCalls.map { call ->
+                                    val tool = exposedTools[call.name]
+                                    CompletedMcpCall(tool?.id?.serverId.orEmpty(), tool?.id?.name.orEmpty(), call.id, "{}", if (proposalFailure == com.mypersonalassistent.core.mcp.api.McpError.SENSITIVE_ARGUMENT) MCP_SENSITIVE_ARGUMENT else MCP_UNAVAILABLE, true)
+                                }
+                                val rejected = checkpoint.copy(
+                                    runStatus = AgentRunStatus.ACTIVE, inFlight = false, mcpSuppressed = true,
+                                    pendingMcpCalls = emptyList(), completedMcpCalls = checkpoint.completedMcpCalls + safeFailures,
+                                    expectedAction = MCP_SUPPRESSED, revision = checkpoint.revision + 1, updatedAt = clock(),
+                                )
+                                persist(input.copy(checkpoint = rejected))
+                                return advance(input.copy(checkpoint = rejected), rejected)
+                            }
+                            if (pending.size > MAX_APPROVED_MCP_CALLS - checkpoint.approvedMcpCalls) {
+                                val limited = checkpoint.copy(
+                                    runStatus = AgentRunStatus.ACTIVE,
+                                    inFlight = false,
+                                    mcpSuppressed = true,
+                                    completedMcpCalls = checkpoint.completedMcpCalls + pending.map { it.localResult(MCP_LIMIT, true) },
+                                    expectedAction = MCP_SUPPRESSED,
+                                    operationToken = nextToken(checkpoint.chatId),
+                                    revision = checkpoint.revision + 1,
+                                    updatedAt = clock(),
+                                )
+                                persist(input.copy(checkpoint = limited))
+                                return advance(input.copy(checkpoint = limited), limited)
+                            }
+                            if (checkpoint.completedMcpCalls.size + pending.size > MAX_MCP_TRANSCRIPT_CALLS) {
+                                return terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
+                            }
+                            val waiting = checkpoint.copy(
+                                runStatus = AgentRunStatus.WAITING_MCP_APPROVAL,
+                                inFlight = false,
+                                pendingMcpCalls = pending,
+                                expectedAction = MCP_APPROVE,
+                                revision = checkpoint.revision + 1,
+                                updatedAt = clock(),
+                            )
+                            // The approval UI is published by persist only after the full canonical
+                            // queue and its digests are durable in recovery storage.
+                            persist(input.copy(checkpoint = waiting))
+                            return AgentRunResult(waiting)
+                        }
                         when (val event = AgentEnvelopeParser.parse(provider.text, checkpoint)) {
                             is EnvelopeResult.Failure -> return failure(checkpoint, AgentFailureKind.SCHEMA).also { publish(it.checkpoint) }
                             is EnvelopeResult.Plan -> {
@@ -352,6 +557,16 @@ internal class DefaultAgentRunEngine(
                                         updatedAt = clock(),
                                     ), visibleQuestion = event.question).also { publish(it.checkpoint) }
                                 } else terminalWorkflow(checkpoint).also { publish(it.checkpoint) }
+                            }
+                            EnvelopeResult.RequestMcpEnable -> {
+                                if (!checkpoint.mcpSuppressed) return failure(checkpoint, AgentFailureKind.SCHEMA).also { publish(it.checkpoint) }
+                                return AgentRunResult(checkpoint.copy(
+                                    runStatus = AgentRunStatus.WAITING_USER,
+                                    inFlight = false,
+                                    expectedAction = MCP_ENABLE_CONFIRMATION,
+                                    revision = checkpoint.revision + 1,
+                                    updatedAt = clock(),
+                                )).also { publish(it.checkpoint) }
                             }
                             is EnvelopeResult.Step -> {
                                 val stepEvent = if (checkpoint.revisionPending || checkpoint.currentStepIndex == checkpoint.plan.lastIndex) AgentEvent.LAST_STEP_ACCEPTED else AgentEvent.STEP_ACCEPTED
@@ -462,20 +677,27 @@ internal class DefaultAgentRunEngine(
     private fun prepareProviderCall(checkpoint: AgentCheckpoint): AgentCheckpoint? {
         if (checkpoint.providerCallsUsed >= MAX_PROVIDER_CALLS_PER_RUN) return null
         return when (checkpoint.phase) {
-            AgentPhase.PLANNING -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, planningCallsUsed = checkpoint.planningCallsUsed + 1, inFlight = true, updatedAt = clock())
-            AgentPhase.EXECUTION -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, inFlight = true, updatedAt = clock())
-            AgentPhase.VALIDATION -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, validationAttempts = checkpoint.validationAttempts + 1, inFlight = true, updatedAt = clock())
+            AgentPhase.PLANNING -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, planningCallsUsed = checkpoint.planningCallsUsed + 1, providerError = null, providerHttpStatus = null, inFlight = true, updatedAt = clock())
+            AgentPhase.EXECUTION -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, providerError = null, providerHttpStatus = null, inFlight = true, updatedAt = clock())
+            AgentPhase.VALIDATION -> checkpoint.copy(providerCallsUsed = checkpoint.providerCallsUsed + 1, validationAttempts = checkpoint.validationAttempts + 1, providerError = null, providerHttpStatus = null, inFlight = true, updatedAt = clock())
             AgentPhase.INTAKE, AgentPhase.DONE -> null
         }
     }
 
-    private fun failure(checkpoint: AgentCheckpoint, kind: AgentFailureKind): AgentRunResult {
+    private fun failure(
+        checkpoint: AgentCheckpoint,
+        kind: AgentFailureKind,
+        providerError: LlmError? = null,
+        providerHttpStatus: Int? = null,
+    ): AgentRunResult {
         val retry = kind != AgentFailureKind.WORKFLOW && kind != AgentFailureKind.BUDGET && canSpendExtra(checkpoint)
         val failed = checkpoint.copy(
             runStatus = AgentRunStatus.FAILED,
             inFlight = false,
             retryAllowed = retry,
             failureKind = kind,
+            providerError = providerError,
+            providerHttpStatus = providerHttpStatus,
             expectedAction = if (retry) RETRY else NEW_TASK,
             updatedAt = clock(),
         )
@@ -508,7 +730,7 @@ internal class DefaultAgentRunEngine(
         return AgentRunResult(checkpoint, rejectedTransition = transition)
     }
     private fun canonicalState(checkpoint: AgentCheckpoint): CanonicalAgentState = when (checkpoint.runStatus) {
-        AgentRunStatus.WAITING_APPROVAL -> CanonicalAgentState.P_WAIT_APPROVAL
+        AgentRunStatus.WAITING_APPROVAL, AgentRunStatus.WAITING_MCP_APPROVAL -> CanonicalAgentState.P_WAIT_APPROVAL
         AgentRunStatus.WAITING_USER -> CanonicalAgentState.P_WAIT_ANSWER
         AgentRunStatus.STALE_PAUSED -> CanonicalAgentState.STALE_PAUSED
         AgentRunStatus.REFUSED -> CanonicalAgentState.REFUSED
@@ -519,7 +741,7 @@ internal class DefaultAgentRunEngine(
     }
     private fun targetFor(checkpoint: AgentCheckpoint): ResumeTarget = when {
         checkpoint.runStatus == AgentRunStatus.WAITING_USER -> ResumeTarget.RESTORE_WAITING_ANSWER
-        checkpoint.runStatus == AgentRunStatus.WAITING_APPROVAL -> ResumeTarget.RESTORE_WAITING_APPROVAL
+        checkpoint.runStatus == AgentRunStatus.WAITING_APPROVAL || checkpoint.runStatus == AgentRunStatus.WAITING_MCP_APPROVAL -> ResumeTarget.RESTORE_WAITING_APPROVAL
         checkpoint.phase == AgentPhase.PLANNING -> ResumeTarget.REPEAT_PLANNING_CALL
         checkpoint.phase == AgentPhase.EXECUTION -> ResumeTarget.REPEAT_EXECUTION_CALL
         checkpoint.phase == AgentPhase.VALIDATION -> ResumeTarget.REPEAT_VALIDATION_CALL
@@ -527,25 +749,34 @@ internal class DefaultAgentRunEngine(
     }
     private fun canSpendExtra(checkpoint: AgentCheckpoint) = checkpoint.extraAttemptsUsed < MAX_EXTRA_ATTEMPTS_PER_RUN && checkpoint.providerCallsUsed < MAX_PROVIDER_CALLS_PER_RUN
 
-    private fun phaseInstruction(checkpoint: AgentCheckpoint): String = when (checkpoint.phase) {
+    private fun phaseInstruction(checkpoint: AgentCheckpoint): String {
+        val mcpEnableInstruction = if (checkpoint.mcpSuppressed) """
+            If the user explicitly asks to use MCP again, you may instead return only {"schemaVersion":1,"kind":"REQUEST_MCP_ENABLE","runId":"${checkpoint.runId}","revision":${checkpoint.revision}}. This requests UI confirmation and never enables MCP by itself.
+        """.trimIndent() else ""
+        return when (checkpoint.phase) {
         AgentPhase.PLANNING -> """
             Return exactly one JSON object: no Markdown and no additional fields. Every response must contain schemaVersion=1, runId=${checkpoint.runId}, and revision=${checkpoint.revision}; the whole object is at most 16384 code points.
             Return PLAN_READY with 1..3 steps, each {"id":"nonblank, max 36 code points","title":"nonblank, max 120 code points","successCriterion":"nonblank, max 300 code points"}: {"schemaVersion":1,"kind":"PLAN_READY","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"steps":[...]}
             Or return NEEDS_USER: {"schemaVersion":1,"kind":"NEEDS_USER","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"question":"nonblank, max 500 code points","expectedInput":"nonblank, max 240 code points"}.
+            $mcpEnableInstruction
         """.trimIndent()
         AgentPhase.EXECUTION -> if (checkpoint.revisionPending) """
             Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
             Return only {"schemaVersion":1,"kind":"REVISED_RESULT","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"artifact":"nonblank, max 8000 code points","summary":"nonblank, max 1000 code points"}; revise only listed issues.
+            $mcpEnableInstruction
         """.trimIndent() else """
             Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
             Return only {"schemaVersion":1,"kind":"STEP_RESULT","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"stepId":${JsonPrimitive(checkpoint.plan[checkpoint.currentStepIndex].id)},"artifact":"nonblank, max 8000 code points","summary":"nonblank, max 1000 code points"}.
+            $mcpEnableInstruction
         """.trimIndent()
         AgentPhase.VALIDATION -> """
             Return exactly one JSON object: no Markdown and no additional fields. Use schemaVersion=1, runId=${checkpoint.runId}, revision=${checkpoint.revision}; the whole object is at most 16384 code points.
             Return PASS only as {"schemaVersion":1,"kind":"PASS","runId":"${checkpoint.runId}","revision":${checkpoint.revision}}.
             Or return REVISE only as {"schemaVersion":1,"kind":"REVISE","runId":"${checkpoint.runId}","revision":${checkpoint.revision},"issues":["nonblank, max 400 code points"]}, with 1..5 issues.
+            $mcpEnableInstruction
         """.trimIndent()
         AgentPhase.INTAKE, AgentPhase.DONE -> "No provider call is allowed."
+        }
     }
 
     private fun checkpointContext(checkpoint: AgentCheckpoint): String = buildString {
@@ -560,12 +791,16 @@ internal class DefaultAgentRunEngine(
             append("plan_change_comment=").append(it.comment).append('\n')
         }
     }
+    private fun digest(server: String, tool: String, args: String, revision: Long, callId: String): String = java.security.MessageDigest.getInstance("SHA-256").digest("$server|$tool|$args|$revision|$callId".toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun uuid(value: String): String? = value.takeIf { it.length == 32 }?.let { "${it.substring(0,8)}-${it.substring(8,12)}-${it.substring(12,16)}-${it.substring(16,20)}-${it.substring(20)}" }
 
     private fun validateRecoveryInput(input: AgentRunInput) {
         require(input.messages.size <= 80)
         require(input.messages.sumOf { it.content.codePointCount(0, it.content.length) } <= 48_000)
         require(input.messages.all { it.content.codePointCount(0, it.content.length) <= 12_000 })
-        require(encode(requireNotNull(input.checkpoint)).length <= 16_384)
+        // Up to five approved MCP results (1 MiB each) plus their bounded arguments must survive
+        // process death. The former 16 KiB workflow-only cap rejected valid MCP results.
+        require(encode(requireNotNull(input.checkpoint)).toByteArray().size <= MAX_CHECKPOINT_BYTES)
     }
 
     private fun titleOf(messages: List<com.mypersonalassistent.core.history.api.ChatMessage>): String = messages
@@ -592,12 +827,30 @@ internal class DefaultAgentRunEngine(
         require(checkpoint.candidateResult.codePointCount(0, checkpoint.candidateResult.length) <= 8_000)
         require(checkpoint.revisionIssues.size <= 5 && checkpoint.revisionIssues.all { it.valid(400) })
         require(checkpoint.providerCallsUsed in 0..MAX_PROVIDER_CALLS_PER_RUN && checkpoint.extraAttemptsUsed in 0..MAX_EXTRA_ATTEMPTS_PER_RUN)
+        require(checkpoint.providerHttpStatus == null || checkpoint.providerHttpStatus in 100..599)
         require(checkpoint.phase != AgentPhase.DONE || checkpoint.runStatus == AgentRunStatus.COMPLETED)
+        require(checkpoint.pendingMcpCalls.size <= MAX_PENDING_MCP_CALLS)
+        require(checkpoint.completedMcpCalls.size <= MAX_MCP_TRANSCRIPT_CALLS)
+        require(checkpoint.pendingMcpCalls.size + checkpoint.completedMcpCalls.size <= MAX_MCP_TRANSCRIPT_CALLS)
+        require(checkpoint.approvedMcpCalls in 0..MAX_APPROVED_MCP_CALLS)
+        require(checkpoint.pendingMcpCalls.all {
+            it.toolCallId.isNotBlank() && it.canonicalArguments.toByteArray().size <= 64 * 1024 &&
+                it.displayArguments.codePointCount(0, it.displayArguments.length) <= 8_193
+        })
+        require(checkpoint.completedMcpCalls.all {
+            it.toolCallId.isNotBlank() && it.canonicalArguments.toByteArray().size <= 64 * 1024 &&
+                it.result.toByteArray().size + (it.structuredContent?.toString()?.toByteArray()?.size ?: 0) <= 1024 * 1024 &&
+                (it.structuredContent == null || it.structuredContent is JsonObject || it.structuredContent is JsonArray)
+        })
     }
 
     private fun String.valid(limit: Int) = isNotBlank() && codePointCount(0, length) <= limit
 
     private companion object {
+        const val MAX_CHECKPOINT_BYTES = 40 * 1024 * 1024
+        const val MAX_PENDING_MCP_CALLS = 5
+        const val MAX_APPROVED_MCP_CALLS = 5
+        const val MAX_MCP_TRANSCRIPT_CALLS = MAX_PROVIDER_CALLS_PER_RUN * MAX_PENDING_MCP_CALLS
         const val WAIT = "Подождите"
         const val ANSWER = "Ответьте на вопрос"
         const val CONTINUE = "Напишите сообщение, чтобы продолжить"
@@ -605,6 +858,14 @@ internal class DefaultAgentRunEngine(
         const val RETRY = "Повторить"
         const val APPROVE = "Утвердить план"
         const val NEW_TASK = "Напишите новую задачу"
+        const val MCP_APPROVE = "Подтвердите вызов MCP"
+        const val MCP_SUPPRESSED = "MCP недоступен или вызов отклонён. Продолжаю без MCP; можно снова разрешить MCP"
+        const val MCP_ENABLE_CONFIRMATION = "Подтвердите явное включение MCP кнопкой «Включить MCP»"
+        const val MCP_DENIED = "MCP call denied by user"
+        const val MCP_UNAVAILABLE = "MCP unavailable"
+        const val MCP_OUTCOME_UNKNOWN = "MCP external action outcome unknown"
+        const val MCP_LIMIT = "MCP tool-call limit reached"
+        const val MCP_SENSITIVE_ARGUMENT = "MCP call rejected because arguments contain configured credentials"
     }
 
     private suspend fun readSnapshot(ref: InvariantSnapshotRef) = when (val result = invariants?.readSnapshot(ref)) {
@@ -641,18 +902,30 @@ internal class DefaultAgentRunEngine(
     }
     private fun com.mypersonalassistent.core.invariants.api.InvariantSnapshot.ref() = InvariantSnapshotRef(id, collectionRevision, contentDigest)
     private fun digest(value: String): String = java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun providerToolName(serverId: String, toolName: String): String = "mcp_${digest(serverId).take(16)}_${digest(toolName).take(24)}"
+    private fun canonicalJson(value: JsonElement): String = when (value) {
+        is JsonObject -> value.entries.sortedBy { it.key }.joinToString(prefix = "{", postfix = "}") { (key, child) -> JsonPrimitive(key).toString() + ":" + canonicalJson(child) }
+        is JsonArray -> value.joinToString(prefix = "[", postfix = "]") { canonicalJson(it) }
+        else -> value.toString()
+    }
+    private fun PendingMcpCall.localResult(text: String, isError: Boolean, structuredContent: JsonElement? = null) = CompletedMcpCall(serverId, toolName, toolCallId, canonicalArguments, text, isError, structuredContent)
+    private fun CompletedMcpCall.toExchange() = LlmToolExchange(
+        LlmToolCall(toolCallId, providerToolName(serverId, toolName), json.parseToJsonElement(canonicalArguments)), result, isError, structuredContent,
+    )
     private fun terminalInvariantFailure(input: AgentRunInput): AgentCheckpoint = AgentCheckpoint(input.chatId, UUID.randomUUID().toString(), phase = AgentPhase.PLANNING, runStatus = AgentRunStatus.FAILED, failureKind = AgentFailureKind.CONTEXT, expectedAction = NEW_TASK, updatedAt = clock())
     private fun refused(input: AgentRunInput, ref: InvariantSnapshotRef, refusal: SafeInvariantRefusal): AgentCheckpoint = AgentCheckpoint(input.chatId, UUID.randomUUID().toString(), phase = AgentPhase.PLANNING, runStatus = AgentRunStatus.REFUSED, invariantSnapshot = ref, failureKind = AgentFailureKind.WORKFLOW, expectedAction = NEW_TASK, updatedAt = clock(), operationToken = AgentOperationToken(1), refusal = refusal)
     private fun refused(checkpoint: AgentCheckpoint, refusal: SafeInvariantRefusal): AgentCheckpoint = checkpoint.copy(runStatus = AgentRunStatus.REFUSED, inFlight = false, failureKind = AgentFailureKind.WORKFLOW, expectedAction = NEW_TASK, revision = checkpoint.revision + 1, updatedAt = clock(), refusal = refusal)
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 private data class CheckpointWire(
-    val schemaVersion: Int = 4, val chatId: String, val runId: String, val revision: Long,
+    val schemaVersion: Int = 5, val chatId: String, val runId: String, val revision: Long,
     val phase: String, val runStatus: String, val plan: List<PlanWire>, val currentStepIndex: Int,
     val acceptedSummaries: List<String>, val candidateResult: String, val expectedAction: String,
     val providerCallsUsed: Int, val planningCallsUsed: Int, val validationAttempts: Int,
     val extraAttemptsUsed: Int, val retryAllowed: Boolean, val failureKind: String? = null,
+    val providerError: String? = null, val providerHttpStatus: Int? = null,
     /** v3 read-only fields; v4 writes omit them. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pausedFromStatus: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val resumeTarget: String? = null,
@@ -662,9 +935,12 @@ private data class CheckpointWire(
     val approvedPlanRevision: Long? = null, val approvedAt: Long? = null, val staleTarget: String = ResumeTarget.NONE.name,
     val operationToken: Long = 0, val planChangeBaseRevision: Long? = null, val planChangeComment: String? = null,
     val refusalTitle: String? = null, val refusalCategory: String? = null, val refusalRuleId: String? = null, val refusalExplanation: String? = null,
+    val mcpSuppressed: Boolean = false, val pendingMcpCalls: List<McpCallWire> = emptyList(), val approvedMcpCalls: Int = 0,
+    val completedMcpCalls: List<CompletedMcpCallWire> = emptyList(),
+    val mcpOutcomeUnknown: Boolean = false,
 ) {
     fun toCheckpoint(): AgentCheckpoint {
-        require(schemaVersion in 3..4)
+        require(schemaVersion in 3..8)
         val snapshot = if (invariantSnapshotId == null && invariantCollectionRevision == null && invariantDigest == null) {
             null
         } else InvariantSnapshotRef(
@@ -674,7 +950,7 @@ private data class CheckpointWire(
         )
         val refusal = refusalExplanation?.let { SafeInvariantRefusal(refusalTitle, refusalCategory?.let(com.mypersonalassistent.core.invariants.api.InvariantCategory::valueOf), refusalRuleId?.let { id -> com.mypersonalassistent.core.invariants.api.InvariantRuleId(id) }, it) }
         val planChange = if (planChangeBaseRevision == null && planChangeComment == null) null else PlanChangeContext(requireNotNull(planChangeBaseRevision), requireNotNull(planChangeComment))
-        val checkpoint = AgentCheckpoint(chatId, runId, revision, AgentPhase.valueOf(phase), runStatus = if (runStatus == LEGACY_PAUSED) AgentRunStatus.ACTIVE else AgentRunStatus.valueOf(runStatus), plan = plan.map { AgentPlanStep(it.id, it.title, it.successCriterion) }, currentStepIndex = currentStepIndex, acceptedSummaries = acceptedSummaries, candidateResult = candidateResult, expectedAction = expectedAction, providerCallsUsed = providerCallsUsed, planningCallsUsed = planningCallsUsed, validationAttempts = validationAttempts, extraAttemptsUsed = extraAttemptsUsed, retryAllowed = retryAllowed, failureKind = failureKind?.let(AgentFailureKind::valueOf), inFlight = inFlight, updatedAt = updatedAt, revisionPending = revisionPending, revisionIssues = revisionIssues, invariantSnapshot = snapshot, approvedPlanRevision = approvedPlanRevision, approvedAt = approvedAt, staleTarget = ResumeTarget.valueOf(staleTarget), operationToken = AgentOperationToken(operationToken), planChange = planChange, refusal = refusal)
+        val checkpoint = AgentCheckpoint(chatId, runId, revision, AgentPhase.valueOf(phase), runStatus = if (runStatus == LEGACY_PAUSED) AgentRunStatus.ACTIVE else AgentRunStatus.valueOf(runStatus), plan = plan.map { AgentPlanStep(it.id, it.title, it.successCriterion) }, currentStepIndex = currentStepIndex, acceptedSummaries = acceptedSummaries, candidateResult = candidateResult, expectedAction = expectedAction, providerCallsUsed = providerCallsUsed, planningCallsUsed = planningCallsUsed, validationAttempts = validationAttempts, extraAttemptsUsed = extraAttemptsUsed, retryAllowed = retryAllowed, failureKind = failureKind?.let(AgentFailureKind::valueOf), providerError = providerError?.let(LlmError::valueOf), providerHttpStatus = providerHttpStatus, inFlight = inFlight, updatedAt = updatedAt, revisionPending = revisionPending, revisionIssues = revisionIssues, invariantSnapshot = snapshot, approvedPlanRevision = approvedPlanRevision, approvedAt = approvedAt, staleTarget = ResumeTarget.valueOf(staleTarget), operationToken = AgentOperationToken(operationToken), planChange = planChange, refusal = refusal, mcpSuppressed = mcpSuppressed, pendingMcpCalls = pendingMcpCalls.map { it.toCall() }, approvedMcpCalls = approvedMcpCalls, completedMcpCalls = completedMcpCalls.map { it.toCall() }, mcpOutcomeUnknown = mcpOutcomeUnknown)
         return if (runStatus == LEGACY_PAUSED) checkpoint.fromLegacyPaused(requireNotNull(resumeTarget)) else checkpoint
     }
     private fun AgentCheckpoint.fromLegacyPaused(targetValue: String): AgentCheckpoint = when (ResumeTarget.valueOf(targetValue)) {
@@ -697,7 +973,15 @@ private data class CheckpointWire(
     }
     companion object {
         private const val LEGACY_PAUSED = "PAUSED"
-        fun from(value: AgentCheckpoint) = CheckpointWire(schemaVersion = 4, chatId = value.chatId, runId = value.runId, revision = value.revision, phase = value.phase.name, runStatus = value.runStatus.name, plan = value.plan.map { PlanWire(it.id, it.title, it.successCriterion) }, currentStepIndex = value.currentStepIndex, acceptedSummaries = value.acceptedSummaries, candidateResult = value.candidateResult, expectedAction = value.expectedAction, providerCallsUsed = value.providerCallsUsed, planningCallsUsed = value.planningCallsUsed, validationAttempts = value.validationAttempts, extraAttemptsUsed = value.extraAttemptsUsed, retryAllowed = value.retryAllowed, failureKind = value.failureKind?.name, inFlight = value.inFlight, updatedAt = value.updatedAt, revisionPending = value.revisionPending, revisionIssues = value.revisionIssues, invariantSnapshotId = value.invariantSnapshot?.id?.value, invariantCollectionRevision = value.invariantSnapshot?.collectionRevision?.value, invariantDigest = value.invariantSnapshot?.contentDigest, approvedPlanRevision = value.approvedPlanRevision, approvedAt = value.approvedAt, staleTarget = value.staleTarget.name, operationToken = value.operationToken.value, planChangeBaseRevision = value.planChange?.basePlanRevision, planChangeComment = value.planChange?.comment, refusalTitle = value.refusal?.title, refusalCategory = value.refusal?.category?.name, refusalRuleId = value.refusal?.ruleId?.value, refusalExplanation = value.refusal?.explanation)
+        fun from(value: AgentCheckpoint) = CheckpointWire(schemaVersion = 8, chatId = value.chatId, runId = value.runId, revision = value.revision, phase = value.phase.name, runStatus = value.runStatus.name, plan = value.plan.map { PlanWire(it.id, it.title, it.successCriterion) }, currentStepIndex = value.currentStepIndex, acceptedSummaries = value.acceptedSummaries, candidateResult = value.candidateResult, expectedAction = value.expectedAction, providerCallsUsed = value.providerCallsUsed, planningCallsUsed = value.planningCallsUsed, validationAttempts = value.validationAttempts, extraAttemptsUsed = value.extraAttemptsUsed, retryAllowed = value.retryAllowed, failureKind = value.failureKind?.name, providerError = value.providerError?.name, providerHttpStatus = value.providerHttpStatus, inFlight = value.inFlight, updatedAt = value.updatedAt, revisionPending = value.revisionPending, revisionIssues = value.revisionIssues, invariantSnapshotId = value.invariantSnapshot?.id?.value, invariantCollectionRevision = value.invariantSnapshot?.collectionRevision?.value, invariantDigest = value.invariantSnapshot?.contentDigest, approvedPlanRevision = value.approvedPlanRevision, approvedAt = value.approvedAt, staleTarget = value.staleTarget.name, operationToken = value.operationToken.value, planChangeBaseRevision = value.planChange?.basePlanRevision, planChangeComment = value.planChange?.comment, refusalTitle = value.refusal?.title, refusalCategory = value.refusal?.category?.name, refusalRuleId = value.refusal?.ruleId?.value, refusalExplanation = value.refusal?.explanation, mcpSuppressed = value.mcpSuppressed, pendingMcpCalls = value.pendingMcpCalls.map(McpCallWire::from), approvedMcpCalls = value.approvedMcpCalls, completedMcpCalls = value.completedMcpCalls.map(CompletedMcpCallWire::from), mcpOutcomeUnknown = value.mcpOutcomeUnknown)
     }
 }
 @Serializable private data class PlanWire(val id: String, val title: String, val successCriterion: String)
+@Serializable private data class McpCallWire(val serverId: String, val toolName: String, val toolCallId: String, val canonicalArguments: String, val digest: String, val status: String, val displayArguments: String? = null) {
+    fun toCall() = com.mypersonalassistent.core.agent.api.PendingMcpCall(serverId, toolName, toolCallId, canonicalArguments, digest, com.mypersonalassistent.core.agent.api.McpCallStatus.valueOf(status), displayArguments ?: "{}")
+    companion object { fun from(value: com.mypersonalassistent.core.agent.api.PendingMcpCall) = McpCallWire(value.serverId, value.toolName, value.toolCallId, value.canonicalArguments, value.digest, value.status.name, value.displayArguments) }
+}
+@Serializable private data class CompletedMcpCallWire(val serverId: String, val toolName: String, val toolCallId: String, val canonicalArguments: String, val result: String, val isError: Boolean, val structuredContent: String? = null) {
+    fun toCall() = CompletedMcpCall(serverId, toolName, toolCallId, canonicalArguments, result, isError, structuredContent?.let(Json::parseToJsonElement))
+    companion object { fun from(value: CompletedMcpCall) = CompletedMcpCallWire(value.serverId, value.toolName, value.toolCallId, value.canonicalArguments, value.result, value.isError, value.structuredContent?.toString()) }
+}

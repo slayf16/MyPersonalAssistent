@@ -12,6 +12,8 @@ import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
 import com.mypersonalassistent.core.invariants.api.InvariantRepository
+import com.mypersonalassistent.core.mcp.api.ChatMcpRepository
+import com.mypersonalassistent.core.mcp.api.McpOperationCoordinator
 import com.mypersonalassistent.feature.chat.api.ChatEffect
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import com.mypersonalassistent.feature.chat.api.ChatState
@@ -19,8 +21,8 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.StateFlow
 
 /** Lifecycle owner for the feature Store. InstanceKeeper preserves it across configuration changes. */
-class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, engine: AgentRunEngine, recovery: AgentRecoveryRepository, invariants: InvariantRepository? = null) : ComponentContext by componentContext {
-    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, engine, recovery, invariants).create()) }
+class ChatFeatureComponent(componentContext: ComponentContext, id: String, history: HistoryRepository, memory: MemoryRepository, engine: AgentRunEngine, recovery: AgentRecoveryRepository, invariants: InvariantRepository? = null, mcp: ChatMcpRepository, operations: McpOperationCoordinator) : ComponentContext by componentContext {
+    private val retained = instanceKeeper.getOrCreate { RetainedStore(ChatStoreFactory(DefaultStoreFactory(), id, history, memory, engine, recovery, invariants, mcp, operations = operations).create()) }
     val state: StateFlow<ChatState> = retained.store.stateFlow(lifecycle)
     val effects: ReceiveChannel<ChatEffect> = retained.store.labelsChannel(lifecycle)
     init { retained.store.accept(ChatIntent.Load) }

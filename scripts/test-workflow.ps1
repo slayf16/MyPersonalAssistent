@@ -218,6 +218,27 @@ $migrated = & $runner -Action status -Id $script:taskId | ConvertFrom-Json
 Assert ($migrated.cyclesUsed -eq 1 -and $migrated.provenance.dispatches.Count -eq 0 -and $migrated.provenance.completions.Count -eq 0) 'Legacy history migration fabricated evidence or lost cycle count.'
 
 # QP-12: policy texts and all four profiles publish the same matrix and honest trust boundary.
+$decisionScope = 'Remaining CODING only; invariant/review/QA role matrix unchanged'
+$script:taskId = 'TASK-014'; & $runner -Action new -Id $script:taskId -Title 'Approved coder override test' | Out-Null
+Set-IsolatedStage 'CODING'
+[pscustomobject]@{
+    taskId='TASK-014'; stage='CODING'; role='ANDROID_DEVELOPER'; model='gpt-5.6-sol'; reasoningEffort='high'
+    approvedAt='2026-09-29'; userQuote='Synthetic explicit decision'; scope=$decisionScope
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $testRoot 'tasks/TASK-014/coding-model-decision.json') -Encoding UTF8
+$overrideDispatch = Dispatch 'CODING' 'ANDROID_DEVELOPER' '/root/override_coder' 'gpt-5.6-sol' 'high' 'Task-local override'
+Assert (-not [string]::IsNullOrWhiteSpace($overrideDispatch)) 'TASK-014 approved override was not applied.'
+
+$script:taskId = 'TASK-015'; & $runner -Action new -Id $script:taskId -Title 'Foreign coder override test' | Out-Null
+Set-IsolatedStage 'CODING'
+[pscustomobject]@{
+    taskId='TASK-015'; stage='CODING'; role='ANDROID_DEVELOPER'; model='gpt-5.6-sol'; reasoningEffort='high'
+    approvedAt='2026-09-29'; userQuote='Synthetic file must not authorize another task'; scope=$decisionScope
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $testRoot 'tasks/TASK-015/coding-model-decision.json') -Encoding UTF8
+Reject-Unchanged { Dispatch 'CODING' 'ANDROID_DEVELOPER' '/root/foreign_override' 'gpt-5.6-sol' 'high' 'Foreign override rejected' } 'mismatch'
+$defaultDispatch = Dispatch 'CODING' 'ANDROID_DEVELOPER' '/root/default_coder' 'gpt-5.6-terra' 'high' 'Default matrix retained'
+Assert (-not [string]::IsNullOrWhiteSpace($defaultDispatch)) 'Non-TASK-014 coder matrix changed.'
+
+# QP-12: policy texts and all four profiles publish the same matrix and honest trust boundary.
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $agents = Get-Content -Raw (Join-Path $projectRoot 'AGENTS.md')
 $workflow = Get-Content -Raw (Join-Path $projectRoot 'docs/WORKFLOW.md')
@@ -232,6 +253,6 @@ foreach ($profile in @('android-developer.md','mobile-qa.md','system-analyst.md'
     Assert ($text -match 'dispatch' -and $text -match 'complete-stage') "Profile $profile lacks provenance instructions."
 }
 
-Write-Output 'PASS: QP-01..QP-12 executed: positive flow, full field tamper/missing matrix, canonical root aliases, all-stage role/model/reasoning rejects, stale report/plan, invalidated reuse, independent review, legacy history, allow-cycles/user-fixes/accept, and docs consistency.'
+Write-Output 'PASS: QP-01..QP-13 executed: positive flow, full field tamper/missing matrix, canonical root aliases, all-stage role/model/reasoning rejects, stale report/plan, invalidated reuse, independent review, legacy history, allow-cycles/user-fixes/accept, TASK-014-only model override, and docs consistency.'
 
 Write-Output "Isolated artifacts: $testRoot"

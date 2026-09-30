@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,17 +46,10 @@ import kotlinx.coroutines.flow.StateFlow
             )
             Spacer(Modifier.weight(1f))
             TextButton(
-                onClick = { accept(HomeIntent.EditProfile) },
-                modifier = Modifier.semantics { contentDescription = "Изменить профиль" },
-            ) { Text("Профиль") }
-            TextButton(
                 onClick = { accept(HomeIntent.EditKey) },
                 modifier = Modifier.semantics { contentDescription = "Сменить ключ" },
             ) { Text("Сменить ключ") }
-            TextButton(
-                onClick = { accept(HomeIntent.OpenInvariants) },
-                modifier = Modifier.semantics { contentDescription = "Открыть инварианты" },
-            ) { Text("Инварианты") }
+            androidx.compose.material3.IconButton(onClick = { accept(HomeIntent.OpenSettings) }, modifier = Modifier.semantics { contentDescription = "Настройки" }) { androidx.compose.material3.Icon(Icons.Default.Settings, contentDescription = null) }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when {

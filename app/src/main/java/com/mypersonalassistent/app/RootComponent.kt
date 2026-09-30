@@ -20,6 +20,10 @@ import com.mypersonalassistent.feature.home.impl.HomeFeatureComponent
 import com.mypersonalassistent.feature.profile.impl.ProfileFeatureComponent
 import com.mypersonalassistent.feature.invariants.impl.InvariantsFeatureComponent
 import com.mypersonalassistent.core.invariants.api.InvariantRepository
+import com.mypersonalassistent.core.mcp.api.McpCatalogRepository
+import com.mypersonalassistent.core.mcp.api.ChatMcpRepository
+import com.mypersonalassistent.core.mcp.api.McpOperationCoordinator
+import com.mypersonalassistent.feature.mcpsettings.impl.McpSettingsFeatureComponent
 import java.util.UUID
 import kotlinx.serialization.Serializable
 
@@ -32,6 +36,8 @@ interface RootComponent {
         class Home(val component: HomeComponent) : Child();
         class Chat(val component: ChatComponent) : Child()
         class Invariants(val component: InvariantsComponent) : Child()
+        class Settings(val component: SettingsComponent) : Child()
+        class McpSettings(val component: McpSettingsComponent) : Child()
     }
 }
 
@@ -62,8 +68,13 @@ class HomeComponent(
     val onEditKey: () -> Unit,
     val onEditProfile: () -> Unit,
     val onInvariants: () -> Unit,
+    val onSettings: () -> Unit,
 ) : ComponentContext by componentContext {
     val feature = HomeFeatureComponent(componentContext, history, recovery)
+}
+class SettingsComponent(componentContext: ComponentContext, val onProfile: () -> Unit, val onInvariants: () -> Unit, val onMcp: () -> Unit, val onExit: () -> Unit) : ComponentContext by componentContext
+class McpSettingsComponent(componentContext: ComponentContext, catalog: McpCatalogRepository, val onExit: () -> Unit) : ComponentContext by componentContext {
+    val feature = McpSettingsFeatureComponent(componentContext, catalog)
 }
 
 class ChatComponent(
@@ -74,10 +85,12 @@ class ChatComponent(
     engine: AgentRunEngine,
     recovery: AgentRecoveryRepository,
     invariants: InvariantRepository,
+    mcp: ChatMcpRepository,
+    operations: McpOperationCoordinator,
     val onExit: () -> Unit,
     val onInvariants: () -> Unit,
 ) : ComponentContext by componentContext {
-    val feature = ChatFeatureComponent(componentContext, id, history, memory, engine, recovery, invariants)
+    val feature = ChatFeatureComponent(componentContext, id, history, memory, engine, recovery, invariants, mcp, operations)
 }
 
 class InvariantsComponent(
@@ -96,6 +109,9 @@ class DefaultRootComponent(
     private val memory: MemoryRepository,
     private val engine: AgentRunEngine,
     private val invariants: InvariantRepository,
+    private val mcpCatalog: McpCatalogRepository,
+    private val chatMcp: ChatMcpRepository,
+    private val mcpOperations: McpOperationCoordinator,
 ) : RootComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     override val childStack: Value<ChildStack<*, RootComponent.Child>> = childStack(
@@ -130,7 +146,8 @@ class DefaultRootComponent(
                     onOpen = { navigation.push(Config.Chat(it)) },
                     onEditKey = { navigation.push(Config.Credentials(false)) },
                     onEditProfile = { navigation.push(Config.Profile(firstRun = false)) },
-                    onInvariants = { navigation.push(Config.Invariants) })
+                    onInvariants = { navigation.push(Config.Invariants) },
+                    onSettings = { navigation.push(Config.Settings) })
             )
 
             is Config.Chat -> RootComponent.Child.Chat(
@@ -142,11 +159,15 @@ class DefaultRootComponent(
                     engine,
                     recovery,
                     invariants,
+                    chatMcp,
+                    mcpOperations,
                     onExit = { navigation.pop() },
                     onInvariants = { navigation.push(Config.Invariants) },
                 ))
 
             Config.Invariants -> RootComponent.Child.Invariants(InvariantsComponent(context, invariants) { navigation.pop() })
+            Config.Settings -> RootComponent.Child.Settings(SettingsComponent(context, { navigation.push(Config.Profile(false)) }, { navigation.push(Config.Invariants) }, { navigation.push(Config.McpSettings) }, { navigation.pop() }))
+            Config.McpSettings -> RootComponent.Child.McpSettings(McpSettingsComponent(context, mcpCatalog) { navigation.pop() })
         }
 
     @Serializable
@@ -161,5 +182,7 @@ class DefaultRootComponent(
         data class Chat(val id: String) : Config
         @Serializable
         data object Invariants : Config
+        @Serializable data object Settings : Config
+        @Serializable data object McpSettings : Config
     }
 }

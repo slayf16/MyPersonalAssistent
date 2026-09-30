@@ -18,6 +18,8 @@ import com.mypersonalassistent.core.history.api.ChatSnapshot
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.history.api.MessageRole
 import com.mypersonalassistent.core.invariants.api.InvariantRepository
+import com.mypersonalassistent.core.mcp.api.ChatMcpRepository
+import com.mypersonalassistent.core.mcp.api.McpOperationCoordinator
 import com.mypersonalassistent.core.memory.api.MemoryRepository
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.feature.chat.api.ChatEffect
@@ -27,7 +29,9 @@ import com.mypersonalassistent.feature.chat.api.TaskMemoryDraft
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -45,7 +49,9 @@ internal class ChatStoreFactory(
     private val engine: AgentRunEngine,
     private val recovery: AgentRecoveryRepository,
     private val invariants: InvariantRepository? = null,
+    private val mcp: ChatMcpRepository,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val operations: McpOperationCoordinator = NoopMcpOperationCoordinator,
 ) {
     fun create(): ChatStore = object : ChatStore,
         Store<ChatIntent, ChatState, ChatEffect> by storeFactory.create(
@@ -130,9 +136,37 @@ internal class ChatStoreFactory(
                 ChatIntent.ApplyTaskMemory -> applyTaskMemory()
                 ChatIntent.RequestExit -> if (!state().saving) set { copy(saveDialog = true) }
                 ChatIntent.CloseDialog -> if (!state().saving) set { copy(saveDialog = false) }
+                ChatIntent.OpenMcp -> openMcp()
+                ChatIntent.CloseMcp -> set { copy(mcpSelectorOpen = false) }
+                is ChatIntent.SetMcpPermission -> setMcp(intent.serverId, intent.enabled)
+                is ChatIntent.DecideMcpCall -> decideMcp(intent.digest, intent.allow)
+                ChatIntent.ReenableMcp -> reenableMcp()
                 ChatIntent.Discard -> discardExit()
                 ChatIntent.ConfirmSave -> save()
             }
+        }
+
+        private fun openMcp() { scope.launch { val permissions = mcp.permissions(id); set { copy(mcpSelectorOpen = true, mcpPermissions = permissions) } } }
+        private fun setMcp(serverId: String, enabled: Boolean) { scope.launch {
+            try {
+                if (!enabled && runJob?.isActive == true) {
+                    ++token
+                    runJob?.cancelAndJoin()
+                    state().checkpoint?.let { applyResult(engine.interruptMcp(AgentRunInput(id, state().messages, state().taskMemory, it)), state().messages, state().taskMemory) }
+                }
+                if (mcp.setEnabled(id, serverId, enabled) is com.mypersonalassistent.core.mcp.api.McpResult.Success) { val permissions = mcp.permissions(id); set { copy(mcpPermissions = permissions) } } else publish(ChatEffect.TechnicalError)
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) { publish(ChatEffect.TechnicalError) }
+        } }
+        private fun decideMcp(digest: String, allow: Boolean) {
+            val before = state(); val checkpoint = before.checkpoint ?: return
+            if (checkpoint.runStatus != AgentRunStatus.WAITING_MCP_APPROVAL) return
+            val serverId = checkpoint.pendingMcpCalls.firstOrNull { it.digest == digest }?.serverId
+            executeRun(before.messages, before.taskMemory, checkpoint, operationServerId = if (allow) serverId else null) { input -> engine.decideMcpCall(input, digest, allow) }
+        }
+        private fun reenableMcp() {
+            val before = state(); val checkpoint = before.checkpoint ?: return
+            if (!checkpoint.mcpSuppressed) return
+            executeRun(before.messages, before.taskMemory, checkpoint, operation = engine::reenableMcp)
         }
 
         private fun load(force: Boolean = false) {
@@ -188,14 +222,14 @@ internal class ChatStoreFactory(
                 AgentRunStatus.ACTIVE -> engine::answer
                 else -> engine::start
             }
-            executeRun(messages, before.taskMemory, checkpoint, action)
+            executeRun(messages, before.taskMemory, checkpoint, operation = action)
         }
 
         private fun retry() {
             val before = state()
             val checkpoint = before.checkpoint ?: return
             if (checkpoint.runStatus != AgentRunStatus.FAILED || !checkpoint.retryAllowed) return
-            executeRun(before.messages, before.taskMemory, checkpoint, engine::retry)
+            executeRun(before.messages, before.taskMemory, checkpoint, operation = engine::retry)
         }
 
         private fun approvePlan() {
@@ -230,18 +264,20 @@ internal class ChatStoreFactory(
             val before = state()
             val checkpoint = before.checkpoint ?: return
             if (checkpoint.runStatus != AgentRunStatus.STALE_PAUSED) return
-            executeRun(before.messages, before.taskMemory, checkpoint, engine::continueWithCurrentRules)
+            executeRun(before.messages, before.taskMemory, checkpoint, operation = engine::continueWithCurrentRules)
         }
 
         private fun executeRun(
             messages: List<ChatMessage>,
             task: TaskMemory,
             checkpoint: AgentCheckpoint?,
+            operationServerId: String? = null,
             operation: suspend (AgentRunInput) -> AgentRunResult,
         ) {
             if (runJob?.isActive == true) return
             val callToken = ++token
-            runJob = scope.launch {
+            lateinit var launched: Job
+            launched = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     val result = operation(AgentRunInput(id, messages, task, checkpoint))
                     if (callToken != token) return@launch
@@ -250,8 +286,20 @@ internal class ChatStoreFactory(
                     throw cancelled
                 } catch (_: Throwable) {
                     if (callToken == token) publish(ChatEffect.TechnicalError)
+                } finally {
+                    operationServerId?.let { operations.unregister(it, launched) }
                 }
             }
+            runJob = launched
+            operationServerId?.let { serverId ->
+                operations.register(serverId, launched, invalidateBeforeCancellation = { ++token }) {
+                    val current = state()
+                    val interrupted = current.checkpoint ?: return@register
+                    val normalized = engine.interruptMcp(AgentRunInput(id, current.messages, current.taskMemory, interrupted))
+                    applyResult(normalized, current.messages, current.taskMemory)
+                }
+            }
+            launched.start()
         }
 
         private suspend fun applyResult(
@@ -278,7 +326,14 @@ internal class ChatStoreFactory(
             if (persistResult) engine.persist(AgentRunInput(id, visible, updatedTask, result.checkpoint))
             val expectedRefusal = result.failure == AgentFailureKind.WORKFLOW &&
                 result.checkpoint.runStatus == AgentRunStatus.REFUSED
-            if (result.failure != null && !expectedRefusal) publish(ChatEffect.TechnicalError)
+            if (result.failure != null && !expectedRefusal) {
+                val providerError = result.checkpoint.providerError
+                if (result.failure == AgentFailureKind.PROVIDER && providerError != null) {
+                    publish(ChatEffect.ProviderError(providerError, result.checkpoint.providerHttpStatus))
+                } else {
+                    publish(ChatEffect.TechnicalError)
+                }
+            }
         }
 
         private fun startNewTask() {
@@ -431,4 +486,10 @@ internal class ChatStoreFactory(
     }
 
     private companion object { const val TASK_FIELD_LIMIT = 1_000; const val TASK_LIST_LIMIT = 4_000 }
+}
+
+private object NoopMcpOperationCoordinator : McpOperationCoordinator {
+    override fun register(serverId: String, job: Job, invalidateBeforeCancellation: () -> Unit, normalizeAfterCancellation: suspend () -> Unit) = Unit
+    override fun unregister(serverId: String, job: Job) = Unit
+    override suspend fun cancelAndJoin(serverId: String) = Unit
 }

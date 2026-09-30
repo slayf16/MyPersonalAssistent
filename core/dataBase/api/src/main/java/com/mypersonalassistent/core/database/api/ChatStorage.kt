@@ -44,6 +44,20 @@ interface MemoryStorage {
     suspend fun upsertProfile(profile: StoredProfile): StorageResult
     suspend fun readTaskMemory(chatId: String): StoredTaskMemory?
 }
+data class StoredMcpServer(
+    val id: String, val name: String, val endpoint: String, val normalizedEndpoint: String,
+    val createdAt: Long, val updatedAt: Long, val secretState: String = "ACTIVE",
+)
+data class StoredChatMcpPermission(val chatId: String, val serverId: String, val enabled: Boolean, val updatedAt: Long)
+interface McpStorage {
+    fun observeMcpServers(): Flow<List<StoredMcpServer>>
+    suspend fun readMcpServer(id: String): StoredMcpServer?
+    suspend fun upsertMcpServer(server: StoredMcpServer): StorageResult
+    /** Deletes the server and every chat permission in one Room transaction. */
+    suspend fun deleteMcpServer(id: String): StorageResult
+    suspend fun permissions(chatId: String): List<StoredChatMcpPermission>
+    suspend fun setPermission(permission: StoredChatMcpPermission): StorageResult
+}
 data class StoredAgentCheckpoint(
     val chatId: String,
     val checkpointJson: String,

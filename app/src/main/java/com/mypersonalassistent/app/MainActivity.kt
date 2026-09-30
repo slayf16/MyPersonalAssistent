@@ -21,8 +21,12 @@ import com.mypersonalassistent.core.history.api.AgentRecoveryRepository
 import com.mypersonalassistent.core.memory.api.MemoryRepository
 import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.core.invariants.api.InvariantRepository
+import com.mypersonalassistent.core.mcp.api.McpCatalogRepository
+import com.mypersonalassistent.core.mcp.api.ChatMcpRepository
+import com.mypersonalassistent.core.mcp.api.McpOperationCoordinator
 import com.mypersonalassistent.feature.invariants.impl.InvariantsScreen
 import com.mypersonalassistent.feature.chat.api.ChatEffect
+import com.mypersonalassistent.feature.chat.api.toProviderErrorMessage
 import com.mypersonalassistent.feature.chat.impl.ChatScreen
 import com.mypersonalassistent.feature.credentials.impl.CredentialsScreen
 import com.mypersonalassistent.feature.home.impl.HomeScreen
@@ -36,6 +40,10 @@ import com.mypersonalassistent.core.llm.impl.llmModule
 import com.mypersonalassistent.core.memory.impl.memoryModule
 import com.mypersonalassistent.core.agent.impl.agentModule
 import com.mypersonalassistent.core.invariants.impl.invariantsModule
+import com.mypersonalassistent.core.mcp.impl.mcpModule
+import com.mypersonalassistent.feature.settings.impl.SettingsScreen
+import com.mypersonalassistent.feature.settings.api.SettingsIntent
+import com.mypersonalassistent.feature.mcpsettings.impl.McpSettingsScreen
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
 
@@ -44,7 +52,7 @@ class MyPersonalAssistentApplication : android.app.Application() {
         super.onCreate()
         startKoin {
             androidContext(this@MyPersonalAssistentApplication)
-            modules(credentialsModule, databaseModule, historyModule, memoryModule, invariantsModule, agentModule, llmModule)
+            modules(credentialsModule, databaseModule, historyModule, memoryModule, invariantsModule, mcpModule, agentModule, llmModule)
         }
     }
 }
@@ -57,7 +65,10 @@ class MainActivity : ComponentActivity() {
         val memory = org.koin.java.KoinJavaComponent.get<MemoryRepository>(MemoryRepository::class.java)
         val engine = org.koin.java.KoinJavaComponent.get<AgentRunEngine>(AgentRunEngine::class.java)
         val invariants = org.koin.java.KoinJavaComponent.get<InvariantRepository>(InvariantRepository::class.java)
-        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, recovery, memory, engine, invariants)
+        val mcpCatalog = org.koin.java.KoinJavaComponent.get<McpCatalogRepository>(McpCatalogRepository::class.java)
+        val chatMcp = org.koin.java.KoinJavaComponent.get<ChatMcpRepository>(ChatMcpRepository::class.java)
+        val mcpOperations = org.koin.java.KoinJavaComponent.get<McpOperationCoordinator>(McpOperationCoordinator::class.java)
+        val root = DefaultRootComponent(defaultComponentContext(), credentials, history, recovery, memory, engine, invariants, mcpCatalog, chatMcp, mcpOperations)
         setContent {
             MyPersonalAssistentTheme {
                 Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
@@ -96,6 +107,7 @@ private fun RootContent(root: RootComponent) {
                                     com.mypersonalassistent.feature.home.api.HomeEffect.EditKey -> page.component.onEditKey()
                                     com.mypersonalassistent.feature.home.api.HomeEffect.EditProfile -> page.component.onEditProfile()
                                     com.mypersonalassistent.feature.home.api.HomeEffect.OpenInvariants -> page.component.onInvariants()
+                                    com.mypersonalassistent.feature.home.api.HomeEffect.OpenSettings -> page.component.onSettings()
                                     is com.mypersonalassistent.feature.home.api.HomeEffect.Open -> page.component.onOpen(effect.id)
                                     com.mypersonalassistent.feature.home.api.HomeEffect.TechnicalError -> snackbar.showSnackbar("Техническая ошибка")
                                 }
@@ -121,6 +133,9 @@ private fun RootContent(root: RootComponent) {
                             for (effect in feature.effects) {
                                 when (effect) {
                                     ChatEffect.TechnicalError -> snackbar.showSnackbar("Техническая ошибка")
+                                    is ChatEffect.ProviderError -> snackbar.showSnackbar(
+                                        effect.category.toProviderErrorMessage(effect.httpStatus)
+                                    )
                                     ChatEffect.NavigateHome -> page.component.onExit()
                                     ChatEffect.OpenInvariants -> page.component.onInvariants()
                                 }
@@ -133,6 +148,8 @@ private fun RootContent(root: RootComponent) {
                         LaunchedEffect(feature) { for (effect in feature.effects) if (effect is com.mypersonalassistent.feature.invariants.api.InvariantsEffect.NavigateBack) page.component.onExit() }
                         InvariantsScreen(feature.state, feature::accept)
                     }
+                    is RootComponent.Child.Settings -> SettingsScreen { intent -> when (intent) { SettingsIntent.OpenProfile -> page.component.onProfile(); SettingsIntent.OpenInvariants -> page.component.onInvariants(); SettingsIntent.OpenMcp -> page.component.onMcp(); SettingsIntent.Back -> page.component.onExit() } }
+                    is RootComponent.Child.McpSettings -> McpSettingsScreen(page.component.feature.state, page.component.feature::accept, page.component.onExit)
                 }
             }
         }

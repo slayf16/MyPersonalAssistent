@@ -18,8 +18,18 @@ import com.mypersonalassistent.core.history.api.ChatSummary
 import com.mypersonalassistent.core.history.api.HistoryRepository
 import com.mypersonalassistent.core.history.api.MessageRole
 import com.mypersonalassistent.core.llm.api.Llm
+import com.mypersonalassistent.core.llm.api.LlmError
 import com.mypersonalassistent.core.llm.api.LlmRequest
 import com.mypersonalassistent.core.llm.api.LlmResult
+import com.mypersonalassistent.core.llm.api.LlmToolCall
+import com.mypersonalassistent.core.mcp.api.McpToolGateway
+import com.mypersonalassistent.core.mcp.api.McpToolDefinition
+import com.mypersonalassistent.core.mcp.api.McpToolId
+import com.mypersonalassistent.core.mcp.api.McpToolCall
+import com.mypersonalassistent.core.mcp.api.McpToolResult
+import com.mypersonalassistent.core.mcp.api.McpResult
+import com.mypersonalassistent.core.mcp.api.McpError
+import com.mypersonalassistent.core.mcp.api.McpPreparedCall
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.core.invariants.api.CollectionRevision
 import com.mypersonalassistent.core.invariants.api.InvariantChange
@@ -47,6 +57,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -54,6 +68,390 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DefaultAgentRunEngineTest {
+    @Test fun `provider failure metadata survives the engine and recovery wire`() = runBlocking {
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(
+            ScriptedLlm { LlmResult.Failure(LlmError.RATE_LIMIT, 429) },
+            SimpleComposer,
+            store,
+            store,
+        )
+
+        val result = engine.start(input())
+
+        assertEquals(AgentFailureKind.PROVIDER, result.failure)
+        assertEquals(LlmError.RATE_LIMIT, result.checkpoint.providerError)
+        assertEquals(429, result.checkpoint.providerHttpStatus)
+        engine.persist(input(result.checkpoint))
+        val recovered = requireNotNull(engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson))
+        assertEquals(LlmError.RATE_LIMIT, recovered.providerError)
+        assertEquals(429, recovered.providerHttpStatus)
+    }
+
+    @Test fun `interrupting an in flight MCP call records unknown outcome without a provider retry`() = runBlocking {
+        val gateway = BlockingGateway()
+        val llm = ScriptedLlm { request ->
+            check(request.toolExchanges.isEmpty())
+            LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-1", request.tools.single().name, JsonObject(emptyMap()))))
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val proposed = engine.start(input())
+        val approval = async { engine.decideMcpCall(input(proposed.checkpoint), proposed.checkpoint.pendingMcpCalls.single().digest, true) }
+
+        gateway.started.receive()
+        approval.cancelAndJoin()
+        val interrupted = engine.interruptMcp(input(proposed.checkpoint))
+
+        assertTrue(interrupted.checkpoint.mcpSuppressed)
+        assertFalse(interrupted.checkpoint.inFlight)
+        assertTrue(interrupted.checkpoint.pendingMcpCalls.isEmpty())
+        assertEquals("call-1", interrupted.checkpoint.completedMcpCalls.single().toolCallId)
+        assertTrue(interrupted.checkpoint.completedMcpCalls.single().isError)
+        assertTrue(interrupted.checkpoint.mcpOutcomeUnknown)
+        assertEquals(1, llm.calls)
+    }
+
+    @Test fun `recovery converts an in flight MCP call to unknown and never leaves it retryable`() = runBlocking {
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(ScriptedLlm(::planReady), SimpleComposer, store, store)
+        val checkpoint = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.ACTIVE, inFlight = true,
+            pendingMcpCalls = listOf(com.mypersonalassistent.core.agent.api.PendingMcpCall("12345678-1234-1234-1234-123456789012", "tool", "call", "{}", "digest", com.mypersonalassistent.core.agent.api.McpCallStatus.IN_FLIGHT)),
+        )
+        engine.persist(input(checkpoint))
+
+        val recovered = requireNotNull(engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson))
+
+        assertFalse(recovered.inFlight)
+        assertTrue(recovered.mcpSuppressed)
+        assertTrue(recovered.pendingMcpCalls.isEmpty())
+        assertEquals("call", recovered.completedMcpCalls.single().toolCallId)
+        assertTrue(recovered.completedMcpCalls.single().isError)
+        assertTrue(recovered.mcpOutcomeUnknown)
+    }
+    @Test fun `waiting and completed MCP checkpoints survive process recreation exactly`() = runBlocking {
+        val waitingStore = RecoveryStore()
+        val waitingEngine = DefaultAgentRunEngine(ScriptedLlm(::planReady), SimpleComposer, waitingStore, waitingStore)
+        val waiting = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), revision = 2, phase = AgentPhase.EXECUTION,
+            runStatus = AgentRunStatus.WAITING_MCP_APPROVAL,
+            pendingMcpCalls = listOf(com.mypersonalassistent.core.agent.api.PendingMcpCall("12345678-1234-1234-1234-123456789012", "tool", "waiting-call", "{}", "waiting-digest", com.mypersonalassistent.core.agent.api.McpCallStatus.WAITING_CONFIRMATION)),
+        )
+        waitingEngine.persist(input(waiting))
+        val waitingRecovered = requireNotNull(waitingEngine.decodeCheckpoint(requireNotNull(waitingStore.recovery).checkpointJson))
+
+        assertEquals(waiting.pendingMcpCalls, waitingRecovered.pendingMcpCalls)
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, waitingRecovered.runStatus)
+
+        val completedStore = RecoveryStore()
+        val completedEngine = DefaultAgentRunEngine(ScriptedLlm(::planReady), SimpleComposer, completedStore, completedStore)
+        val completed = waiting.copy(
+            runStatus = AgentRunStatus.ACTIVE,
+            pendingMcpCalls = emptyList(),
+            completedMcpCalls = listOf(com.mypersonalassistent.core.agent.api.CompletedMcpCall("12345678-1234-1234-1234-123456789012", "tool", "completed-call", "{}", "result", false)),
+        )
+        completedEngine.persist(input(completed))
+        val completedRecovered = requireNotNull(completedEngine.decodeCheckpoint(requireNotNull(completedStore.recovery).checkpointJson))
+
+        assertEquals(completed.completedMcpCalls, completedRecovered.completedMcpCalls)
+        assertFalse(completedRecovered.mcpOutcomeUnknown)
+    }
+
+    @Test fun `unknown outcome stays visible and a later proposal requires a fresh approval`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            assertTrue(request.toolExchanges.single().isError)
+            LlmResult.Success("", "tool_calls", listOf(LlmToolCall("fresh-call", request.tools.single().name, JsonObject(emptyMap()))))
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val unknown = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.EXECUTION, runStatus = AgentRunStatus.ACTIVE,
+            plan = listOf(com.mypersonalassistent.core.agent.api.AgentPlanStep("step-one", "Plan", "Done")),
+            mcpSuppressed = true,
+            completedMcpCalls = listOf(com.mypersonalassistent.core.agent.api.CompletedMcpCall("12345678-1234-1234-1234-123456789012", "lookup", "old-call", "{}", "MCP external action outcome unknown", true)),
+            mcpOutcomeUnknown = true,
+        )
+        engine.persist(input(unknown))
+        val enabled = engine.reenableMcp(input(unknown)).checkpoint
+
+        val proposal = engine.answer(input(enabled, listOf(message("task"), message("next message"))))
+
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, proposal.checkpoint.runStatus)
+        assertEquals("fresh-call", proposal.checkpoint.pendingMcpCalls.single().toolCallId)
+        assertTrue(proposal.checkpoint.mcpOutcomeUnknown)
+        assertEquals(0, gateway.calls)
+    }
+
+    @Test fun `sixth approved MCP call is rejected before the gateway`() = runBlocking {
+        val gateway = RecordingGateway()
+        val engine = DefaultAgentRunEngine(ScriptedLlm(::questionFor), SimpleComposer, RecoveryStore(), RecoveryStore(), mcp = gateway)
+        val waiting = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.PLANNING,
+            runStatus = AgentRunStatus.WAITING_MCP_APPROVAL, approvedMcpCalls = 5,
+            pendingMcpCalls = listOf(com.mypersonalassistent.core.agent.api.PendingMcpCall("12345678-1234-1234-1234-123456789012", "lookup", "call-6", "{}", "digest-6", com.mypersonalassistent.core.agent.api.McpCallStatus.WAITING_CONFIRMATION)),
+        )
+
+        val result = engine.decideMcpCall(input(waiting), "digest-6", true)
+
+        assertTrue(result.checkpoint.mcpSuppressed)
+        assertTrue(result.checkpoint.pendingMcpCalls.isEmpty())
+        assertEquals(0, gateway.calls)
+    }
+
+    @Test fun `tool batch that exceeds remaining run budget falls back without partial execution`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) {
+                LlmResult.Success("", "tool_calls", listOf(
+                    LlmToolCall("call-5", request.tools.single().name, JsonObject(emptyMap())),
+                    LlmToolCall("call-6", request.tools.single().name, JsonObject(emptyMap())),
+                ))
+            } else {
+                assertEquals(2, request.toolExchanges.size)
+                questionFor(request)
+            }
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val checkpoint = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.PLANNING,
+            runStatus = AgentRunStatus.ACTIVE, approvedMcpCalls = 4,
+        )
+        engine.persist(input(checkpoint))
+
+        val result = engine.answer(input(checkpoint, listOf(message("task"), message("continue"))))
+
+        assertEquals(0, gateway.calls)
+        assertTrue(result.checkpoint.mcpSuppressed)
+        assertEquals(2, result.checkpoint.completedMcpCalls.size)
+        assertFalse(result.checkpoint.inFlight)
+    }
+    @Test fun `two proposed tool calls require separate approvals and a repeated approval cannot duplicate call`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) LlmResult.Success("", "tool_calls", listOf(
+                LlmToolCall("call-1", request.tools.single().name, JsonObject(emptyMap())),
+                LlmToolCall("call-2", request.tools.single().name, JsonObject(emptyMap())),
+            )) else planReady(request)
+        }
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, RecoveryStore(), RecoveryStore(), mcp = gateway)
+        val proposed = engine.start(input())
+        val first = proposed.checkpoint.pendingMcpCalls[0]
+        val initiallySecond = proposed.checkpoint.pendingMcpCalls[1]
+        val afterFirst = engine.decideMcpCall(input(proposed.checkpoint), first.digest, true)
+        val duplicate = engine.decideMcpCall(input(afterFirst.checkpoint), first.digest, true)
+        val second = afterFirst.checkpoint.pendingMcpCalls.single { it.status == com.mypersonalassistent.core.agent.api.McpCallStatus.WAITING_CONFIRMATION }
+
+        assertTrue(first.digest != initiallySecond.digest)
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, afterFirst.checkpoint.runStatus)
+        assertEquals("call-2", second.toolCallId)
+        assertEquals(1, gateway.calls)
+        assertEquals(afterFirst.checkpoint, duplicate.checkpoint)
+        assertEquals(1, gateway.calls)
+    }
+    @Test fun `credential-equivalent tool argument never reaches checkpoint or display`() = runBlocking {
+        val secret = "configured-token-value"
+        val gateway = SensitiveGateway()
+        val store = RecoveryStore()
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) {
+                LlmResult.Success("", "tool_calls", listOf(LlmToolCall(
+                    "call-sensitive",
+                    request.tools.single().name,
+                    buildJsonObject { put("nested", buildJsonObject { put("value", secret) }) },
+                )))
+            } else questionFor(request)
+        }
+
+        val result = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway).start(input())
+
+        assertEquals(0, gateway.calls)
+        assertTrue(result.checkpoint.pendingMcpCalls.isEmpty())
+        assertTrue(result.checkpoint.mcpSuppressed)
+        assertFalse(requireNotNull(store.recovery).checkpointJson.contains(secret))
+        assertFalse(result.checkpoint.completedMcpCalls.any { it.canonicalArguments.contains(secret) })
+    }
+
+    @Test fun `mixed text and structured tool result survives checkpoint and reaches provider`() = runBlocking {
+        val structured = buildJsonObject { put("temperature", 21); put("unit", "C"); put("boundedPayload", "x".repeat(20_000)) }
+        val gateway = StructuredGateway(structured)
+        var requestAfterTool: LlmRequest? = null
+        var afterToolTurns = 0
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) {
+                LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-structured", request.tools.single().name, JsonObject(emptyMap()))))
+            } else {
+                if (afterToolTurns++ == 0) requestAfterTool = request
+                when (afterToolTurns) { 1 -> planReady(request); 2 -> stepResult(request); else -> pass(request) }
+            }
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val proposed = engine.start(input())
+
+        val result = engine.decideMcpCall(input(proposed.checkpoint), proposed.checkpoint.pendingMcpCalls.single().digest, true)
+
+        assertEquals("forecast text", requestAfterTool!!.toolExchanges.single().result)
+        assertEquals(structured, requestAfterTool!!.toolExchanges.single().structuredContent)
+        assertEquals(structured, result.checkpoint.completedMcpCalls.single().structuredContent)
+        val decoded = engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson)
+        assertEquals(structured, decoded!!.completedMcpCalls.single().structuredContent)
+    }
+    @Test fun `tool proposal persists waiting queue without gateway call`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            assertEquals(1, request.tools.size)
+            LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-1", request.tools.single().name, JsonObject(emptyMap()))))
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val result = engine.start(input())
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, result.checkpoint.runStatus)
+        assertEquals(1, result.checkpoint.pendingMcpCalls.size)
+        assertEquals(0, gateway.calls)
+        val recovered = requireNotNull(engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson))
+        assertEquals(result.checkpoint.pendingMcpCalls, recovered.pendingMcpCalls)
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, recovered.runStatus)
+        assertEquals(result.checkpoint, engine.checkpoint.value)
+    }
+    @Test fun `same tool name from two servers has distinct reversible provider names`() = runBlocking {
+        val gateway = CollisionGateway()
+        var exposedNames = emptyList<String>()
+        val llm = ScriptedLlm { request ->
+            exposedNames = request.tools.map { it.name }
+            LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-second", request.tools[1].name, JsonObject(emptyMap()))))
+        }
+
+        val result = DefaultAgentRunEngine(llm, SimpleComposer, RecoveryStore(), RecoveryStore(), mcp = gateway).start(input())
+
+        assertEquals(2, exposedNames.distinct().size)
+        assertTrue(exposedNames.all { it.matches(Regex("[A-Za-z0-9_-]{1,64}")) })
+        assertTrue(exposedNames.none { it.contains("unsafe raw", ignoreCase = true) || it.contains("lookup") })
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, result.checkpoint.runStatus)
+        assertEquals("87654321-4321-4321-4321-210987654321", result.checkpoint.pendingMcpCalls.single().serverId)
+        assertEquals("unsafe raw lookup / one", result.checkpoint.pendingMcpCalls.single().toolName)
+        assertEquals(0, gateway.calls)
+    }
+
+    @Test fun `typed MCP enable request preserves suppression until explicit UI action`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            assertTrue(request.tools.isEmpty())
+            val command = request.messages.last().text
+            val runId = Regex("runId=([^, ]+)").find(command)!!.groupValues[1]
+            val revision = Regex("revision=(\\d+)").find(command)!!.groupValues[1]
+            success("""{"schemaVersion":1,"kind":"REQUEST_MCP_ENABLE","runId":"$runId","revision":$revision}""")
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val suppressed = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.PLANNING,
+            runStatus = AgentRunStatus.WAITING_USER, mcpSuppressed = true,
+        )
+        engine.persist(input(suppressed))
+
+        val requested = engine.answer(input(suppressed, listOf(message("task"), message("use MCP again"))))
+
+        assertEquals(AgentRunStatus.WAITING_USER, requested.checkpoint.runStatus)
+        assertTrue(requested.checkpoint.mcpSuppressed)
+        assertTrue(requested.checkpoint.expectedAction.contains("Включить MCP"))
+        assertEquals(0, gateway.calls)
+
+        val enabled = engine.reenableMcp(input(requested.checkpoint)).checkpoint
+        assertFalse(enabled.mcpSuppressed)
+        assertEquals(0, gateway.calls)
+    }
+    @Test fun `approved tool call is sent back with its call id before next provider turn`() = runBlocking {
+        val gateway = RecordingGateway()
+        var nextRequest: LlmRequest? = null
+        var turnsAfterTool = 0
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) {
+                LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-1", request.tools.single().name, JsonObject(emptyMap()))))
+            } else {
+                if (turnsAfterTool++ == 0) nextRequest = request
+                when (turnsAfterTool) {
+                    1 -> planReady(request)
+                    2 -> stepResult(request)
+                    else -> pass(request)
+                }
+            }
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val proposed = engine.start(input())
+
+        val result = engine.decideMcpCall(input(proposed.checkpoint), proposed.checkpoint.pendingMcpCalls.single().digest, true)
+
+        assertEquals(1, gateway.calls)
+        assertEquals("call-1", nextRequest!!.toolExchanges.single().call.id)
+        assertEquals("ok", nextRequest!!.toolExchanges.single().result)
+        assertEquals(AgentRunStatus.COMPLETED, result.checkpoint.runStatus)
+    }
+    @Test fun `denied queued calls suppress MCP and continue without an external call`() = runBlocking {
+        val gateway = RecordingGateway()
+        var nextRequest: LlmRequest? = null
+        val llm = ScriptedLlm { request ->
+            if (request.toolExchanges.isEmpty()) {
+                LlmResult.Success("", "tool_calls", listOf(LlmToolCall("call-1", request.tools.single().name, JsonObject(emptyMap()))))
+            } else {
+                nextRequest = request
+                planReady(request)
+            }
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val proposed = engine.start(input())
+
+        val result = engine.decideMcpCall(input(proposed.checkpoint), proposed.checkpoint.pendingMcpCalls.single().digest, false)
+
+        assertEquals(0, gateway.calls)
+        assertTrue(result.checkpoint.mcpSuppressed)
+        assertTrue(nextRequest!!.tools.isEmpty())
+        assertTrue(nextRequest!!.toolExchanges.single().isError)
+    }
+
+    @Test fun `five denied calls do not consume approved call budget or overflow transcript`() = runBlocking {
+        val gateway = RecordingGateway()
+        val llm = ScriptedLlm { request ->
+            if (request.tools.isEmpty()) {
+                val command = request.messages.last().text
+                val runId = Regex("runId=([^, ]+)").find(command)!!.groupValues[1]
+                val revision = Regex("revision=(\\d+)").find(command)!!.groupValues[1]
+                success("""{"schemaVersion":1,"kind":"REQUEST_MCP_ENABLE","runId":"$runId","revision":$revision}""")
+            } else if (request.toolExchanges.size == 5) {
+                LlmResult.Success("", "tool_calls", listOf(LlmToolCall("approved-1", request.tools.single().name, JsonObject(emptyMap()))))
+            } else {
+                planReady(request)
+            }
+        }
+        val store = RecoveryStore()
+        val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store, mcp = gateway)
+        val firstProposal = AgentCheckpoint(
+            "chat", UUID.randomUUID().toString(), phase = AgentPhase.PLANNING,
+            runStatus = AgentRunStatus.WAITING_MCP_APPROVAL,
+            pendingMcpCalls = (1..5).map { index ->
+                com.mypersonalassistent.core.agent.api.PendingMcpCall(
+                    "12345678-1234-1234-1234-123456789012", "lookup", "denied-$index", "{}", "digest-$index",
+                    com.mypersonalassistent.core.agent.api.McpCallStatus.WAITING_CONFIRMATION,
+                )
+            },
+        )
+        engine.persist(input(firstProposal))
+
+        val denied = engine.decideMcpCall(input(firstProposal), firstProposal.pendingMcpCalls.first().digest, false)
+        val enabled = engine.reenableMcp(input(denied.checkpoint)).checkpoint
+        val secondProposal = engine.answer(input(enabled, listOf(message("task"), message("use MCP again"))))
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, secondProposal.checkpoint.runStatus)
+        val approved = engine.decideMcpCall(input(secondProposal.checkpoint), secondProposal.checkpoint.pendingMcpCalls.single().digest, true)
+
+        assertEquals(1, gateway.calls)
+        assertEquals(1, approved.checkpoint.approvedMcpCalls)
+        assertEquals(6, approved.checkpoint.completedMcpCalls.size)
+        assertEquals(6, requireNotNull(engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson)).completedMcpCalls.size)
+    }
     @Test fun `valid plan step and pass publish only validated final result`() = runBlocking {
         val llm = ScriptedLlm { request ->
             val command = request.messages.last().text
@@ -110,19 +508,18 @@ class DefaultAgentRunEngineTest {
         assertEquals(null, engine.decodeCheckpoint("{untrusted raw response}"))
     }
 
-    @Test fun `pause then resume waiting user restores question without provider call`() = runBlocking {
+    @Test fun `interruption normalization preserves waiting user without provider call`() = runBlocking {
         val llm = ScriptedLlm(::questionFor)
         val store = RecoveryStore()
         val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store)
         val waiting = engine.start(input())
 
-        val paused = engine.pause(input(waiting.checkpoint)).checkpoint
-        val resumed = engine.resume(input(paused))
+        val normalized = engine.normalizeInterruptedForRecovery(input(waiting.checkpoint))
 
         assertEquals(1, llm.calls)
-        assertEquals(AgentRunStatus.PAUSED, paused.runStatus)
-        assertEquals(ResumeTarget.RESTORE_WAITING_ANSWER, paused.resumeTarget)
-        assertEquals(AgentRunStatus.WAITING_USER, resumed.checkpoint.runStatus)
+        assertEquals(AgentRunStatus.WAITING_USER, normalized.checkpoint.runStatus)
+        assertEquals(waiting.checkpoint.runId, normalized.checkpoint.runId)
+        assertEquals(waiting.checkpoint.providerCallsUsed, normalized.checkpoint.providerCallsUsed)
         assertEquals(1, llm.calls)
     }
 
@@ -165,7 +562,7 @@ class DefaultAgentRunEngineTest {
         assertEquals(AgentRunStatus.COMPLETED, engine.checkpoint.value?.runStatus)
     }
 
-    @Test fun `pause after cancelled calls keeps the engine checkpoint identity and budgets`() = runBlocking {
+    @Test fun `interruption normalization after cancelled call keeps identity and resumes only on next message`() = runBlocking {
         val llm = BlockingLlm()
         val store = RecoveryStore()
         val engine = DefaultAgentRunEngine(llm, SimpleComposer, store, store)
@@ -176,25 +573,27 @@ class DefaultAgentRunEngineTest {
         assertEquals(1, firstPersisted.providerCallsUsed)
         firstCall.cancelAndJoin()
 
-        val firstPause = engine.pause(input()).checkpoint
-        assertEquals(firstPersisted.runId, firstPause.runId)
-        assertEquals(1, firstPause.providerCallsUsed)
-        assertEquals(AgentRunStatus.PAUSED, firstPause.runStatus)
+        val firstInterrupted = engine.normalizeInterruptedForRecovery(input(firstPersisted)).checkpoint
+        assertEquals(firstPersisted.runId, firstInterrupted.runId)
+        assertEquals(1, firstInterrupted.providerCallsUsed)
+        assertEquals(AgentRunStatus.ACTIVE, firstInterrupted.runStatus)
+        assertFalse(firstInterrupted.inFlight)
 
-        val resumedCall = async { engine.resume(input(firstPause)) }
+        val resumedCall = async { engine.answer(input(firstInterrupted)) }
         assertEquals(2, llm.started.receive())
         val resumedPersisted = requireNotNull(engine.checkpoint.value)
-        assertEquals(firstPause.runId, resumedPersisted.runId)
+        assertEquals(firstInterrupted.runId, resumedPersisted.runId)
         assertEquals(2, resumedPersisted.providerCallsUsed)
         assertEquals(1, resumedPersisted.extraAttemptsUsed)
         resumedCall.cancelAndJoin()
 
-        val secondPause = engine.pause(input()).checkpoint
-        assertEquals(firstPause.runId, secondPause.runId)
-        assertEquals(2, secondPause.providerCallsUsed)
-        assertEquals(1, secondPause.extraAttemptsUsed)
-        assertEquals(AgentRunStatus.PAUSED, secondPause.runStatus)
-        assertEquals(secondPause, engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson))
+        val secondInterrupted = engine.normalizeInterruptedForRecovery(input(resumedPersisted)).checkpoint
+        assertEquals(firstInterrupted.runId, secondInterrupted.runId)
+        assertEquals(2, secondInterrupted.providerCallsUsed)
+        assertEquals(1, secondInterrupted.extraAttemptsUsed)
+        assertEquals(AgentRunStatus.ACTIVE, secondInterrupted.runStatus)
+        assertFalse(secondInterrupted.inFlight)
+        assertEquals(secondInterrupted, engine.decodeCheckpoint(requireNotNull(store.recovery).checkpointJson))
     }
 
     @Test fun `persist registers durable nonterminal run against immutable snapshot`() = runBlocking {
@@ -356,6 +755,18 @@ class DefaultAgentRunEngineTest {
         val revision = Regex("revision=(\\d+)").find(command)!!.groupValues[1]
         return success("""{"schemaVersion":1,"kind":"PLAN_READY","runId":"$runId","revision":$revision,"steps":[{"id":"step-one","title":"Plan","successCriterion":"Done"}]}""")
     }
+    private fun stepResult(request: LlmRequest): LlmResult.Success {
+        val command = request.messages.last().text
+        val runId = Regex("runId=([^, ]+)").find(command)!!.groupValues[1]
+        val revision = Regex("revision=(\\d+)").find(command)!!.groupValues[1]
+        return success("""{"schemaVersion":1,"kind":"STEP_RESULT","runId":"$runId","revision":$revision,"stepId":"step-one","artifact":"final candidate","summary":"completed"}""")
+    }
+    private fun pass(request: LlmRequest): LlmResult.Success {
+        val command = request.messages.last().text
+        val runId = Regex("runId=([^, ]+)").find(command)!!.groupValues[1]
+        val revision = Regex("revision=(\\d+)").find(command)!!.groupValues[1]
+        return success("""{"schemaVersion":1,"kind":"PASS","runId":"$runId","revision":$revision}""")
+    }
     private fun planStepPass(request: LlmRequest): LlmResult.Success {
         val command = request.messages.last().text
         val runId = Regex("runId=([^, ]+)").find(command)!!.groupValues[1]
@@ -370,6 +781,41 @@ class DefaultAgentRunEngineTest {
     private class ScriptedLlm(private val script: (LlmRequest) -> LlmResult) : Llm {
         var calls = 0
         override suspend fun execute(request: LlmRequest): LlmResult { calls++; return script(request) }
+    }
+    private class RecordingGateway : McpToolGateway {
+        var calls = 0
+        override suspend fun tools(chatId: String) = McpResult.Success(listOf(McpToolDefinition(McpToolId("12345678-1234-1234-1234-123456789012", "lookup"), "Lookup", JsonObject(mapOf("type" to JsonPrimitive("object"))))))
+        override suspend fun call(call: McpToolCall): McpResult<McpToolResult> { calls++; return McpResult.Success(McpToolResult(call.callId, "ok")) }
+    }
+    private class SensitiveGateway : McpToolGateway {
+        var calls = 0
+        override suspend fun tools(chatId: String) = McpResult.Success(listOf(McpToolDefinition(McpToolId("12345678-1234-1234-1234-123456789012", "lookup"), "Lookup", JsonObject(mapOf("type" to JsonPrimitive("object"))))))
+        override suspend fun prepareCall(call: McpToolCall) = McpResult.Failure(McpError.SENSITIVE_ARGUMENT)
+        override suspend fun call(call: McpToolCall): McpResult<McpToolResult> { calls++; return McpResult.Success(McpToolResult(call.callId, "must not run")) }
+    }
+    private class StructuredGateway(private val structured: JsonObject) : McpToolGateway {
+        override suspend fun tools(chatId: String) = McpResult.Success(listOf(McpToolDefinition(McpToolId("12345678-1234-1234-1234-123456789012", "weather"), "Weather", JsonObject(mapOf("type" to JsonPrimitive("object"))))))
+        override suspend fun prepareCall(call: McpToolCall) = McpResult.Success(McpPreparedCall("{}"))
+        override suspend fun call(call: McpToolCall) = McpResult.Success(McpToolResult(call.callId, "forecast text", structured))
+    }
+    private class CollisionGateway : McpToolGateway {
+        var calls = 0
+        override suspend fun tools(chatId: String) = McpResult.Success(listOf(
+            McpToolDefinition(McpToolId("12345678-1234-1234-1234-123456789012", "unsafe raw lookup / one"), "First", JsonObject(mapOf("type" to JsonPrimitive("object")))),
+            McpToolDefinition(McpToolId("87654321-4321-4321-4321-210987654321", "unsafe raw lookup / one"), "Second", JsonObject(mapOf("type" to JsonPrimitive("object")))),
+        ))
+        override suspend fun call(call: McpToolCall): McpResult<McpToolResult> {
+            calls++
+            return McpResult.Success(McpToolResult(call.callId, "ok"))
+        }
+    }
+    private class BlockingGateway : McpToolGateway {
+        val started = Channel<McpToolCall>(Channel.UNLIMITED)
+        override suspend fun tools(chatId: String) = McpResult.Success(listOf(McpToolDefinition(McpToolId("12345678-1234-1234-1234-123456789012", "lookup"), "Lookup", JsonObject(mapOf("type" to JsonPrimitive("object"))))))
+        override suspend fun call(call: McpToolCall): McpResult<McpToolResult> {
+            started.send(call)
+            awaitCancellation()
+        }
     }
     private class BlockingLlm : Llm {
         val started = Channel<Int>(Channel.UNLIMITED)

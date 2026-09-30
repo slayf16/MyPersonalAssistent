@@ -15,5 +15,37 @@
 - [ ] **Repository-тесты (V-04 / A-10).** Расширить покрытия границ и лимитов, delete/tombstone/order, stale/double/failed save, snapshot digest/corruption, affected runs, cancellation/rollback.
 - [ ] **Room-тесты (V-05 / A-11).** На target API 36 дополнить migration/reopen oracle: tombstone, audit, snapshot linkage/digest и полный откат состояния при ошибке. Уже выполненные 5 тестов не доказывают всю расширенную матрицу. API 26 не требуется.
 - [ ] **Ручная проверка UI.** Завершить accessibility, крупный шрифт/IME, rotation и process-death проверки со скриншотами на target API 36.
+- [ ] **TASK-014 — авторизация MCP через браузер.** По решению пользователя 2026-09-28 отложить browser-based authorization для MCP-серверов; в текущем scope предусмотрены необязательные поля token и API key. Уточнить и реализовать браузерный вход отдельным последующим поручением.
+
+## TASK-014 — отложенные результаты API-36 QA
+
+Заказчик 2026-09-29 задал приоритет: «проверяй основной флоу, остальное в
+туду. я тебе давал эмулятор с нужным ключом, на нем проверяй». Детальная
+трассировка и исходные FAIL находятся в
+`tasks/TASK-014/tests-cycle3-full-qa.md`; локальная копия backlog —
+`tasks/TASK-014/qa-todo.md`. Эти пункты не исправлены и не являются PASS.
+
+- [ ] **Room cascade fixture.** API-36 `DatabaseModuleTest.kt:203` после
+  удаления сервера ожидал `0`, получил `1`: raw SQLite fixture не включает
+  foreign keys. Проверить fixture и production Room cascade path, затем
+  повторить targeted device test.
+- [ ] **Credentials instrumentation shape.** API-36
+  `SecureCredentialRepositoryTest` не инициализируется: expression-body
+  `runBlocking` возвращает non-`Unit`, AndroidJUnit4 сообщает `should be
+  void`; test bodies не исполнялись. Исправить тестовую форму и повторить
+  credentials instrumentation.
+- [ ] **Достижимость 10-го MCP server.** API-36 `ChatUiTest.kt:123` находит
+  node после `performScrollTo()`, но `assertIsDisplayed()` fails. Вручную
+  доступность списка ещё не подтверждена; проверить scroll/accessibility
+  behaviour и targeted Compose test.
+- [ ] **Секрет в Compose semantics.** API-36 `McpSettingsUiTest.kt:53` нашёл
+  synthetic marker в `InputText` при визуально замаскированном поле. Это не
+  доказывает, что TalkBack произнесёт значение; установить требуемый
+  accessibility contract и повторить проверку без реального секрета.
+- [ ] **Понятный исход validation limit.** Отдельный сохранённый пользовательский
+  run завершился `WORKFLOW/VALIDATION` после двух valid `REVISE`, без HTTP/provider
+  ошибки и без сбоя MCP. Вместо generic `Technical Error` показать понятную причину
+  и следующий шаг; не менять validation limit. Связанное evidence:
+  `tasks/TASK-014/current-build-smoke.md` и `tasks/TASK-014/implementation.md`.
 
 Работу над этим списком выполнять отдельным последующим поручением. Отложенное покрытие не выдавать за PASS; успешную компиляцию отличать от функционального тестирования.

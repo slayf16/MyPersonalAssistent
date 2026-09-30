@@ -1,0 +1,8 @@
+plugins { id("com.android.library"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.serialization") }
+android { namespace = "com.mypersonalassistent.core.mcp.impl"; compileSdk = 36; defaultConfig { minSdk = 26 } }
+dependencies {
+ implementation(project(":core:mcp:api")); implementation(project(":core:dataBase:api")); implementation(project(":core:credentials:api"))
+ implementation("io.ktor:ktor-client-core:3.3.2"); implementation("io.ktor:ktor-client-okhttp:3.3.2"); implementation("io.ktor:ktor-client-content-negotiation:3.3.2"); implementation("io.ktor:ktor-serialization-kotlinx-json:3.3.2")
+ implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1"); implementation("io.insert-koin:koin-core:4.0.2"); implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+ testImplementation("junit:junit:4.13.2"); testImplementation("io.ktor:ktor-client-mock:3.3.2")
+}
