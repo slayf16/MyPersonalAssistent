@@ -25,6 +25,33 @@ function Save-State($value) {
     $value | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $statePath -Force
 }
+function Get-CodingModelOverride {
+    # A customer-approved coder substitution is deliberately task-local.  It cannot affect
+    # planning, invariant validation, review, or QA role requirements.
+    if ($Id -cne 'TASK-014') { return $null }
+    $decisionPath = Join-Path $dir 'coding-model-decision.json'
+    if (-not (Test-Path -LiteralPath $decisionPath)) { return $null }
+    try {
+        $decision = Get-Content -LiteralPath $decisionPath -Raw | ConvertFrom-Json
+    } catch {
+        throw 'Invalid coding-model-decision.json.'
+    }
+    foreach ($property in @('taskId','stage','role','model','reasoningEffort','approvedAt','userQuote','scope')) {
+        if (-not $decision.PSObject.Properties[$property] -or [string]::IsNullOrWhiteSpace([string]$decision.$property)) {
+            throw "Invalid coding-model-decision.json: missing $property."
+        }
+    }
+    if ($decision.taskId -cne $Id -or $decision.stage -cne 'CODING' -or $decision.role -cne 'ANDROID_DEVELOPER' -or
+        $decision.model -cne 'gpt-5.6-sol' -or $decision.reasoningEffort -cne 'high' -or
+        $decision.scope -cne 'Remaining CODING only; invariant/review/QA role matrix unchanged') {
+        throw 'Invalid coding-model-decision.json: unsupported override.'
+    }
+    $approvedAt = [DateTime]::MinValue
+    if (-not [DateTime]::TryParse([string]$decision.approvedAt, [ref]$approvedAt)) {
+        throw 'Invalid coding-model-decision.json: approvedAt must be a date.'
+    }
+    [pscustomobject]@{ model='gpt-5.6-sol'; reasoning='high' }
+}
 function Get-Requirements([string]$forStage) {
     switch ($forStage) {
         'ANALYSIS' { return @([pscustomobject]@{ role='SYSTEM_ANALYST'; artifact='analysis.md'; model='gpt-5.6-sol'; reasoning='medium' }) }
@@ -33,7 +60,10 @@ function Get-Requirements([string]$forStage) {
             [pscustomobject]@{ role='ANDROID_DEVELOPER'; artifact='technical-plan.md'; model='gpt-5.6-terra'; reasoning='high' },
             [pscustomobject]@{ role='MOBILE_QA'; artifact='qa-plan.md'; model='gpt-5.6-terra'; reasoning='high' }
         ) }
-        'CODING' { return @([pscustomobject]@{ role='ANDROID_DEVELOPER'; artifact='implementation.md'; model='gpt-5.6-terra'; reasoning='high' }) }
+        'CODING' {
+            $override = Get-CodingModelOverride
+            return @([pscustomobject]@{ role='ANDROID_DEVELOPER'; artifact='implementation.md'; model=if ($null -eq $override) { 'gpt-5.6-terra' } else { $override.model }; reasoning=if ($null -eq $override) { 'high' } else { $override.reasoning } })
+        }
         'INVARIANT_VALIDATION' { return @([pscustomobject]@{ role='ANDROID_DEVELOPER'; artifact='invariants.md'; model='gpt-5.6-terra'; reasoning='high' }) }
         'CODE_REVIEW' { return @([pscustomobject]@{ role='CODE_REVIEWER'; artifact='review.md'; model='gpt-5.6-sol'; reasoning='medium' }) }
         'TESTING' { return @([pscustomobject]@{ role='MOBILE_QA'; artifact='tests.md'; model='gpt-5.6-terra'; reasoning='high' }) }

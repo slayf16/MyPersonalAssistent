@@ -2,6 +2,8 @@ package com.mypersonalassistent.core.database.impl
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.room.testing.MigrationTestHelper
 import com.mypersonalassistent.core.database.api.ChatStorage
 import com.mypersonalassistent.core.database.api.StorageResult
 import com.mypersonalassistent.core.database.api.StoredChat
@@ -21,6 +23,7 @@ import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.Rule
 import org.junit.runner.RunWith
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.stopKoin
@@ -31,6 +34,7 @@ import org.koin.java.KoinJavaComponent
 class DatabaseModuleTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     private val databaseName = "task006-${System.nanoTime()}.db"
+    @get:Rule val migrationHelper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), AppDatabase::class.java)
 
     @Before fun setUp() {
         context.deleteDatabase(databaseName)
@@ -177,5 +181,45 @@ class DatabaseModuleTest {
         assertEquals(true, reopened.readAgentRunIndex("affected")?.isStale)
         assertEquals(CollectionRevision(1), reopened.invariantCollectionRevision())
         reopened.closeForTesting()
+    }
+
+    @Test fun migrationV5DdlCreatesDraftPermissionsAllOffByDefaultAndCascadesServerDelete() {
+        val legacy = context.openOrCreateDatabase(databaseName, android.content.Context.MODE_PRIVATE, null)
+        createMcpV6Tables(legacy::execSQL)
+        legacy.execSQL("INSERT INTO mcp_servers(id, name, endpoint, normalizedEndpoint, createdAt, updatedAt) VALUES ('server', 'Server', 'https://example.test/mcp', 'https://example.test/mcp', 1, 1)")
+        legacy.execSQL("INSERT INTO chat_mcp_permissions(chatId, serverId, enabled, updatedAt) VALUES ('recovery-draft-without-chat', 'server', 1, 2)")
+
+        legacy.rawQuery("SELECT secretState FROM mcp_servers WHERE id = 'server'", null).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("ACTIVE", cursor.getString(0))
+        }
+        legacy.rawQuery("SELECT COUNT(*) FROM chat_mcp_permissions WHERE chatId = 'new-chat-with-no-row'", null).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+        legacy.execSQL("DELETE FROM mcp_servers WHERE id = 'server'")
+        legacy.rawQuery("SELECT COUNT(*) FROM chat_mcp_permissions WHERE serverId = 'server'", null).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+        legacy.close()
+    }
+
+    @Test fun migrationFromV5PreservesLegacyChatAndSupportsDraftPermissionCascade() = kotlinx.coroutines.runBlocking {
+        migrationHelper.createDatabase(databaseName, 5).apply {
+            execSQL("INSERT INTO chats(id, title, createdAt, updatedAt, contextJson) VALUES ('legacy', 'Legacy chat', 1, 2, '{}')")
+            close()
+        }
+        migrationHelper.runMigrationsAndValidate(databaseName, 6, true, MIGRATION_5_6).close()
+        val storage = RoomChatStorage.createForTesting(context, databaseName)
+        assertEquals("Legacy chat", storage.read("legacy")?.title)
+        val server = com.mypersonalassistent.core.database.api.StoredMcpServer("server", "Server", "https://example.test/mcp", "https://example.test/mcp", 1, 1)
+        assertEquals(StorageResult.Success, storage.upsertMcpServer(server))
+        assertEquals(StorageResult.Success, storage.setPermission(com.mypersonalassistent.core.database.api.StoredChatMcpPermission("draft-without-chat", "server", true, 2)))
+        assertEquals("ACTIVE", storage.readMcpServer("server")?.secretState)
+        assertEquals(1, storage.permissions("draft-without-chat").size)
+        assertEquals(StorageResult.Success, storage.deleteMcpServer("server"))
+        assertTrue(storage.permissions("draft-without-chat").isEmpty())
+        storage.closeForTesting()
     }
 }

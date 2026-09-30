@@ -1,6 +1,7 @@
 package com.mypersonalassistent.feature.chat.impl
 
 import com.mypersonalassistent.core.agent.api.AgentCheckpoint
+import com.mypersonalassistent.core.llm.api.LlmError
 import com.mypersonalassistent.core.agent.api.AgentPhase
 import com.mypersonalassistent.core.agent.api.AgentRunStatus
 import com.mypersonalassistent.core.invariants.api.InvariantCategory
@@ -9,22 +10,27 @@ import com.mypersonalassistent.core.invariants.api.SafeInvariantRefusal
 import com.mypersonalassistent.feature.chat.api.AgentPrimaryAction
 import com.mypersonalassistent.feature.chat.api.toExactRefusalMessage
 import com.mypersonalassistent.feature.chat.api.toUiState
+import com.mypersonalassistent.feature.chat.api.toProviderErrorMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentUiStateTest {
-    @Test fun `waiting user exposes reply instruction and accessible pause action`() {
-        val ui = checkpoint(AgentRunStatus.WAITING_USER, expected = "").toUiState()
-        assertEquals(AgentPrimaryAction.PAUSE, ui.primaryAction)
-        assertEquals("Ответьте на вопрос", ui.expectedAction)
-        assertEquals("Поставить задачу на паузу", ui.actionContentDescription)
+    @Test fun `provider error message contains only safe category and status`() {
+        assertEquals("Ошибка DeepSeek: RATE_LIMIT (HTTP 429)", LlmError.RATE_LIMIT.toProviderErrorMessage(429))
+        assertEquals("Ошибка DeepSeek: NETWORK", LlmError.NETWORK.toProviderErrorMessage(null))
     }
 
-    @Test fun `top bar actions have stable accessible labels`() {
-        assertEquals("Поставить задачу на паузу", checkpoint(AgentRunStatus.ACTIVE).toUiState().actionContentDescription)
-        assertEquals("Продолжить задачу", checkpoint(AgentRunStatus.PAUSED).toUiState().actionContentDescription)
+    @Test fun `waiting user exposes reply instruction without an unavailable primary action`() {
+        val ui = checkpoint(AgentRunStatus.WAITING_USER, expected = "").toUiState()
+        assertEquals(AgentPrimaryAction.NONE, ui.primaryAction)
+        assertEquals("Ответьте на вопрос", ui.expectedAction)
+        assertEquals(null, ui.actionContentDescription)
+    }
+
+    @Test fun `available workflow actions have stable accessible labels`() {
+        assertEquals(null, checkpoint(AgentRunStatus.ACTIVE).toUiState().actionContentDescription)
         assertEquals("Повторить шаг", checkpoint(AgentRunStatus.FAILED, retry = true).toUiState().actionContentDescription)
         assertEquals("Начать новую задачу", checkpoint(AgentRunStatus.FAILED).toUiState().actionContentDescription)
         assertEquals("Утвердить текущий план", checkpoint(AgentRunStatus.WAITING_APPROVAL).toUiState().actionContentDescription)
@@ -32,15 +38,15 @@ class AgentUiStateTest {
         assertEquals("Открыть инварианты", checkpoint(AgentRunStatus.REFUSED).toUiState().actionContentDescription)
     }
 
-    @Test fun `approval and answer retain independently reachable pause`() {
-        assertTrue(checkpoint(AgentRunStatus.WAITING_APPROVAL).toUiState().canPause)
-        assertTrue(checkpoint(AgentRunStatus.WAITING_USER).toUiState().canPause)
-        assertFalse(checkpoint(AgentRunStatus.PAUSED).toUiState().canPause)
+    @Test fun `mcp approval exposes its explicit confirmation instruction`() {
+        val ui = checkpoint(AgentRunStatus.WAITING_MCP_APPROVAL, expected = "").toUiState()
+        assertEquals(AgentPrimaryAction.NONE, ui.primaryAction)
+        assertEquals("Подтвердите вызов MCP", ui.expectedAction)
     }
 
     @Test fun `task memory remains locked until completed checkpoint`() {
         assertFalse(com.mypersonalassistent.feature.chat.api.ChatState("id", checkpoint = checkpoint(AgentRunStatus.WAITING_USER)).taskMemoryEditable)
-        assertFalse(com.mypersonalassistent.feature.chat.api.ChatState("id", checkpoint = checkpoint(AgentRunStatus.PAUSED)).taskMemoryEditable)
+        assertFalse(com.mypersonalassistent.feature.chat.api.ChatState("id", checkpoint = checkpoint(AgentRunStatus.WAITING_MCP_APPROVAL)).taskMemoryEditable)
         assertFalse(com.mypersonalassistent.feature.chat.api.ChatState("id", checkpoint = checkpoint(AgentRunStatus.FAILED)).taskMemoryEditable)
         assertTrue(com.mypersonalassistent.feature.chat.api.ChatState("id", checkpoint = checkpoint(AgentRunStatus.COMPLETED)).taskMemoryEditable)
     }

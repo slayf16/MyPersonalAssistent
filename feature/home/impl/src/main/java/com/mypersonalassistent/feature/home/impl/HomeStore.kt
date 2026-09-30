@@ -40,6 +40,7 @@ internal class HomeStoreFactory(
                 HomeIntent.EditKey -> publish(HomeEffect.EditKey)
                 HomeIntent.EditProfile -> publish(HomeEffect.EditProfile)
                 HomeIntent.OpenInvariants -> publish(HomeEffect.OpenInvariants)
+                HomeIntent.OpenSettings -> publish(HomeEffect.OpenSettings)
                 is HomeIntent.Open -> publish(HomeEffect.Open(intent.id))
                 is HomeIntent.ContinueRecovery -> publish(HomeEffect.Open(intent.id))
                 is HomeIntent.DiscardRecovery -> discard(intent.id)

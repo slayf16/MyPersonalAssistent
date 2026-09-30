@@ -1,14 +1,16 @@
 package com.mypersonalassistent.core.agent.api
 
 import com.mypersonalassistent.core.history.api.ChatMessage
+import com.mypersonalassistent.core.llm.api.LlmError
 import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.core.invariants.api.InvariantSnapshotRef
 import com.mypersonalassistent.core.invariants.api.SafeInvariantRefusal
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonElement
 
 /** Local source of truth for one bounded, foreground task run. */
 enum class AgentPhase { INTAKE, PLANNING, EXECUTION, VALIDATION, DONE }
-enum class AgentRunStatus { ACTIVE, WAITING_USER, WAITING_APPROVAL, STALE_PAUSED, FAILED, REFUSED, COMPLETED, TERMINATED }
+enum class AgentRunStatus { ACTIVE, WAITING_USER, WAITING_APPROVAL, WAITING_MCP_APPROVAL, STALE_PAUSED, FAILED, REFUSED, COMPLETED, TERMINATED }
 enum class ResumeTarget {
     NONE,
     REPEAT_PLANNING_CALL,
@@ -18,6 +20,9 @@ enum class ResumeTarget {
     REPEAT_VALIDATION_CALL,
 }
 enum class AgentFailureKind { PROVIDER, SCHEMA, CONTEXT, WORKFLOW, BUDGET }
+enum class McpCallStatus { WAITING_CONFIRMATION, APPROVED, IN_FLIGHT, COMPLETED, OUTCOME_UNKNOWN, DENIED }
+data class PendingMcpCall(val serverId: String, val toolName: String, val toolCallId: String, val canonicalArguments: String, val digest: String, val status: McpCallStatus, val displayArguments: String = canonicalArguments)
+data class CompletedMcpCall(val serverId: String, val toolName: String, val toolCallId: String, val canonicalArguments: String, val result: String, val isError: Boolean, val structuredContent: JsonElement? = null)
 
 /** Monotonic identity of one serialized engine operation within a chat lane. */
 @JvmInline value class AgentOperationToken(val value: Long)
@@ -48,6 +53,9 @@ data class AgentCheckpoint(
     val extraAttemptsUsed: Int = 0,
     val retryAllowed: Boolean = false,
     val failureKind: AgentFailureKind? = null,
+    /** Safe provider category and status; never contains response bodies, headers or credentials. */
+    val providerError: LlmError? = null,
+    val providerHttpStatus: Int? = null,
     val inFlight: Boolean = false,
     val updatedAt: Long = 0,
     val revisionPending: Boolean = false,
@@ -60,6 +68,13 @@ data class AgentCheckpoint(
     val operationToken: AgentOperationToken = AgentOperationToken(0),
     val planChange: PlanChangeContext? = null,
     val refusal: SafeInvariantRefusal? = null,
+    val mcpSuppressed: Boolean = false,
+    val pendingMcpCalls: List<PendingMcpCall> = emptyList(),
+    val approvedMcpCalls: Int = 0,
+    /** Bounded durable provider conversation for already settled MCP proposals. */
+    val completedMcpCalls: List<CompletedMcpCall> = emptyList(),
+    /** A previously sent external action has no accepted result and must never be retried. */
+    val mcpOutcomeUnknown: Boolean = false,
 )
 
 data class AgentRunInput(
@@ -116,6 +131,10 @@ interface AgentRunEngine {
      * authoritative interrupted checkpoint without starting a provider call or changing budgets.
      */
     suspend fun normalizeInterruptedForRecovery(input: AgentRunInput): AgentRunResult
+    suspend fun decideMcpCall(input: AgentRunInput, digest: String, allow: Boolean): AgentRunResult = AgentRunResult(requireNotNull(input.checkpoint))
+    suspend fun interruptMcp(input: AgentRunInput): AgentRunResult = AgentRunResult(requireNotNull(input.checkpoint))
+    /** Explicit UI action only; it never retries an old external action. */
+    suspend fun reenableMcp(input: AgentRunInput): AgentRunResult = AgentRunResult(requireNotNull(input.checkpoint))
     suspend fun persist(input: AgentRunInput)
     suspend fun discardRecovery(chatId: String): Boolean
     fun decodeCheckpoint(payload: String): AgentCheckpoint?

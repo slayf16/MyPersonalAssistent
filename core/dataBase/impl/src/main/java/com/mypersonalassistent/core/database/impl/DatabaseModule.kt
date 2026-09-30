@@ -4,6 +4,7 @@ import com.mypersonalassistent.core.database.api.ChatStorage
 import com.mypersonalassistent.core.database.api.AgentStorage
 import com.mypersonalassistent.core.database.api.MemoryStorage
 import com.mypersonalassistent.core.database.api.InvariantStorage
+import com.mypersonalassistent.core.database.api.McpStorage
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 
@@ -13,4 +14,5 @@ val databaseModule = module {
     single<MemoryStorage> { get<RoomChatStorage>() }
     single<AgentStorage> { get<RoomChatStorage>() }
     single<InvariantStorage> { get<RoomChatStorage>() }
+    single<McpStorage> { get<RoomChatStorage>() }
 }

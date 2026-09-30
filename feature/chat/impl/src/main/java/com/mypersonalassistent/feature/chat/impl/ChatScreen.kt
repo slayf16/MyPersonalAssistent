@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,6 +48,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Switch
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -100,6 +103,8 @@ fun ChatScreen(stateFlow: StateFlow<ChatState>, accept: (ChatIntent) -> Unit) {
     if (state.planChangeDialog) {
         PlanChangesDialog(state = state, accept = accept)
     }
+    if (state.mcpSelectorOpen) McpSelectorDialog(state, accept)
+    state.mcpApproval?.let { McpApprovalSheet(it.serverId, it.toolName, it.displayArguments, it.digest, state.mcpOutcomeUnknown, accept) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -129,6 +134,8 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                         Text(state.agentUi.phaseLabel)
                         if (state.agentUi.stepLabel.isNotBlank()) Text(state.agentUi.stepLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                         Text(state.agentUi.expectedAction, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.semantics { contentDescription = "Ожидаемое действие: ${state.agentUi.expectedAction}" })
+                        if (state.mcpSuppressed) Text("MCP временно отключён", style = MaterialTheme.typography.labelSmall)
+                        if (state.mcpOutcomeUnknown) Text("Предыдущее действие MCP могло выполниться", style = MaterialTheme.typography.labelSmall)
                     }
                 },
                 windowInsets = WindowInsets(0, 0, 0, 0),
@@ -158,6 +165,8 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = "Контекст задачи")
                     }
+                    TextButton(onClick = { accept(ChatIntent.OpenMcp) }, enabled = !state.loading && !state.saving, modifier = Modifier.semantics { contentDescription = "MCP" }) { Text("MCP") }
+                    if (state.mcpSuppressed) TextButton(onClick = { accept(ChatIntent.ReenableMcp) }, enabled = !state.saving, modifier = Modifier.semantics { contentDescription = "Снова разрешить MCP" }) { Text("Включить MCP") }
                 },
             )
         },
@@ -178,6 +187,50 @@ private fun ChatContent(state: ChatState, accept: (ChatIntent) -> Unit) {
                 contentPadding = contentPadding,
                 accept = accept,
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable private fun McpSelectorDialog(state: ChatState, accept: (ChatIntent) -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = { accept(ChatIntent.CloseMcp) },
+    ) {
+        Text("MCP для чата", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+        if (state.mcpPermissions.isEmpty()) Text("Нет настроенных MCP серверов", modifier = Modifier.padding(24.dp))
+        else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+            items(state.mcpPermissions, key = { it.serverId }) { permission ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(permission.name, Modifier.weight(1f).padding(start = 24.dp))
+                    Switch(
+                        checked = permission.enabled,
+                        onCheckedChange = { accept(ChatIntent.SetMcpPermission(permission.serverId, it)) },
+                        modifier = Modifier.padding(end = 24.dp).semantics { contentDescription = "${permission.name}: ${if (permission.enabled) "включён" else "выключен"}" },
+                    )
+                }
+            }
+        }
+        TextButton({ accept(ChatIntent.CloseMcp) }, modifier = Modifier.align(Alignment.End).padding(16.dp)) { Text("Готово") }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable private fun McpApprovalSheet(serverId: String, toolName: String, arguments: String, digest: String, outcomeUnknown: Boolean, accept: (ChatIntent) -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = { accept(ChatIntent.DecideMcpCall(digest, false)) },
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Подтвердить вызов MCP", style = MaterialTheme.typography.titleLarge)
+            if (outcomeUnknown) Text("Предыдущее внешнее действие могло выполниться. Новый вызов требует отдельного подтверждения.")
+            Text("Сервер: $serverId")
+            Text("Инструмент: $toolName")
+            Text("Аргументы:")
+            Text(arguments, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()).semantics { contentDescription = "Маскированные аргументы MCP" })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { accept(ChatIntent.DecideMcpCall(digest, false)) }, modifier = Modifier.semantics { contentDescription = "Отклонить вызов MCP" }) { Text("Отклонить") }
+                Button(onClick = { accept(ChatIntent.DecideMcpCall(digest, true)) }, modifier = Modifier.semantics { contentDescription = "Разрешить вызов MCP" }) { Text("Разрешить") }
+            }
+            Spacer(Modifier.size(8.dp))
         }
     }
 }

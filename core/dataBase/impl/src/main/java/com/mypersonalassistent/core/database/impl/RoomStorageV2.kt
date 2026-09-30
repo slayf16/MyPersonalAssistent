@@ -33,6 +33,9 @@ import com.mypersonalassistent.core.database.api.StoredInvariantSnapshot
 import com.mypersonalassistent.core.database.api.StoredInvariantMutation
 import com.mypersonalassistent.core.database.api.StoredInvariantCommitResult
 import com.mypersonalassistent.core.database.api.StoredAgentRunIndex
+import com.mypersonalassistent.core.database.api.McpStorage
+import com.mypersonalassistent.core.database.api.StoredMcpServer
+import com.mypersonalassistent.core.database.api.StoredChatMcpPermission
 import com.mypersonalassistent.core.invariants.api.CollectionRevision
 import com.mypersonalassistent.core.invariants.api.InvariantCategory
 import com.mypersonalassistent.core.invariants.api.InvariantOperation
@@ -146,6 +149,20 @@ data class AgentRunIndexEntity(
     val isActive: Boolean, val isStale: Boolean, val staleTarget: String?, val updatedAt: Long,
 )
 
+@Entity(tableName = "mcp_servers", indices = [Index(value = ["normalizedEndpoint"], unique = true)])
+data class McpServerEntity(
+    @PrimaryKey val id: String, val name: String, val endpoint: String, val normalizedEndpoint: String,
+    val createdAt: Long, val updatedAt: Long, val secretState: String = "ACTIVE",
+)
+
+@Entity(
+    tableName = "chat_mcp_permissions",
+    primaryKeys = ["chatId", "serverId"],
+    foreignKeys = [ForeignKey(entity = McpServerEntity::class, parentColumns = ["id"], childColumns = ["serverId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("chatId"), Index("serverId")],
+)
+data class ChatMcpPermissionEntity(val chatId: String, val serverId: String, val enabled: Boolean, val updatedAt: Long)
+
 @Dao
 internal interface ChatDao {
     @Query("SELECT id, title, updatedAt FROM chats ORDER BY updatedAt DESC, id ASC")
@@ -197,6 +214,16 @@ internal interface AgentDao {
 
     @Query("DELETE FROM agent_recovery WHERE chatId = :chatId")
     suspend fun deleteRecovery(chatId: String)
+}
+
+@Dao
+internal interface McpDao {
+    @Query("SELECT * FROM mcp_servers ORDER BY name COLLATE NOCASE ASC, id ASC") fun observeServers(): Flow<List<McpServerEntity>>
+    @Query("SELECT * FROM mcp_servers WHERE id = :id") suspend fun readServer(id: String): McpServerEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertServer(server: McpServerEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPermission(permission: ChatMcpPermissionEntity)
+    @Query("SELECT * FROM chat_mcp_permissions WHERE chatId = :chatId") suspend fun permissions(chatId: String): List<ChatMcpPermissionEntity>
+    @Query("DELETE FROM mcp_servers WHERE id = :id") suspend fun deleteServer(id: String)
 }
 
 @Dao
@@ -253,8 +280,8 @@ internal interface InvariantDao {
 internal data class ChatSummaryRow(val id: String, val title: String, val updatedAt: Long)
 
 @Database(
-    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class, AgentCheckpointEntity::class, AgentRecoveryEntity::class, InvariantCollectionEntity::class, InvariantRuleEntity::class, InvariantAuditEntity::class, InvariantSnapshotEntity::class, AgentRunIndexEntity::class],
-    version = 5,
+    entities = [ChatEntity::class, ProfileEntity::class, TaskMemoryEntity::class, AgentCheckpointEntity::class, AgentRecoveryEntity::class, InvariantCollectionEntity::class, InvariantRuleEntity::class, InvariantAuditEntity::class, InvariantSnapshotEntity::class, AgentRunIndexEntity::class, McpServerEntity::class, ChatMcpPermissionEntity::class],
+    version = 6,
     exportSchema = true,
 )
 internal abstract class AppDatabase : RoomDatabase() {
@@ -262,9 +289,10 @@ internal abstract class AppDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
     abstract fun agentDao(): AgentDao
     abstract fun invariantDao(): InvariantDao
+    abstract fun mcpDao(): McpDao
 }
 
-class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage, AgentStorage, InvariantStorage {
+class RoomChatStorage private constructor(private val database: AppDatabase) : ChatStorage, MemoryStorage, AgentStorage, InvariantStorage, McpStorage {
     override fun observeSummaries(): Flow<List<StoredChatSummary>> =
         database.chatDao().summaries().map { rows ->
             rows.map { StoredChatSummary(it.id, it.title, it.updatedAt) }
@@ -310,6 +338,15 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
 
     override suspend fun readAgentRecovery(chatId: String): StoredAgentRecovery? =
         database.agentDao().readRecovery(chatId)?.toStored()
+
+    override fun observeMcpServers(): Flow<List<StoredMcpServer>> = database.mcpDao().observeServers().map { rows -> rows.map(McpServerEntity::toStored) }
+    override suspend fun readMcpServer(id: String): StoredMcpServer? = database.mcpDao().readServer(id)?.toStored()
+    override suspend fun upsertMcpServer(server: StoredMcpServer): StorageResult = runStorage {
+        database.mcpDao().upsertServer(server.toEntity())
+    }
+    override suspend fun deleteMcpServer(id: String): StorageResult = runStorage { database.withTransaction { database.mcpDao().deleteServer(id) } }
+    override suspend fun permissions(chatId: String): List<StoredChatMcpPermission> = database.mcpDao().permissions(chatId).map(ChatMcpPermissionEntity::toStored)
+    override suspend fun setPermission(permission: StoredChatMcpPermission): StorageResult = runStorage { database.mcpDao().upsertPermission(permission.toEntity()) }
 
     override suspend fun writeAgentRecovery(recovery: StoredAgentRecovery): StorageResult = runStorage {
         database.agentDao().upsertRecovery(recovery.toEntity())
@@ -415,12 +452,16 @@ class RoomChatStorage private constructor(private val database: AppDatabase) : C
                 context.applicationContext,
                 AppDatabase::class.java,
                 databaseName,
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
     }
 }
 
 private fun StoredChat.toEntity() = ChatEntity(id, title, createdAt, updatedAt, contextJson)
 private fun ChatEntity.toStored() = StoredChat(id, title, createdAt, updatedAt, contextJson)
+private fun StoredMcpServer.toEntity() = McpServerEntity(id, name, endpoint, normalizedEndpoint, createdAt, updatedAt, secretState)
+private fun McpServerEntity.toStored() = StoredMcpServer(id, name, endpoint, normalizedEndpoint, createdAt, updatedAt, secretState)
+private fun StoredChatMcpPermission.toEntity() = ChatMcpPermissionEntity(chatId, serverId, enabled, updatedAt)
+private fun ChatMcpPermissionEntity.toStored() = StoredChatMcpPermission(chatId, serverId, enabled, updatedAt)
 private fun StoredProfile.toEntity() = ProfileEntity(
     onboardingStatus = onboardingStatus,
     preferredName = preferredName,
@@ -543,6 +584,21 @@ internal val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_run_index_isNonterminal_collectionRevision` ON `agent_run_index` (`isNonterminal`, `collectionRevision`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_run_index_runId` ON `agent_run_index` (`runId`)")
     }
+}
+
+internal val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        createMcpV6Tables(db::execSQL)
+    }
+}
+
+/** Shared DDL keeps the migration and its SQLite fixture on exactly the same schema contract. */
+internal fun createMcpV6Tables(execSql: (String) -> Unit) {
+    execSql("CREATE TABLE IF NOT EXISTS `mcp_servers` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `endpoint` TEXT NOT NULL, `normalizedEndpoint` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `secretState` TEXT NOT NULL DEFAULT 'ACTIVE', PRIMARY KEY(`id`))")
+    execSql("CREATE UNIQUE INDEX IF NOT EXISTS `index_mcp_servers_normalizedEndpoint` ON `mcp_servers` (`normalizedEndpoint`)")
+    execSql("CREATE TABLE IF NOT EXISTS `chat_mcp_permissions` (`chatId` TEXT NOT NULL, `serverId` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`chatId`, `serverId`), FOREIGN KEY(`serverId`) REFERENCES `mcp_servers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+    execSql("CREATE INDEX IF NOT EXISTS `index_chat_mcp_permissions_chatId` ON `chat_mcp_permissions` (`chatId`)")
+    execSql("CREATE INDEX IF NOT EXISTS `index_chat_mcp_permissions_serverId` ON `chat_mcp_permissions` (`serverId`)")
 }
 
 private const val PROFILE_ID = 1

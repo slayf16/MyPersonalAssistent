@@ -3,16 +3,10 @@ package com.mypersonalassistent.feature.chat.impl
 import com.arkivanov.mvikotlin.main.store.DefaultStoreFactory
 import com.mypersonalassistent.core.agent.api.AgentCheckpoint
 import com.mypersonalassistent.core.agent.api.AgentPhase
-import com.mypersonalassistent.core.agent.api.AgentPauseResult
 import com.mypersonalassistent.core.agent.api.AgentRunEngine
 import com.mypersonalassistent.core.agent.api.AgentRunInput
 import com.mypersonalassistent.core.agent.api.AgentRunResult
 import com.mypersonalassistent.core.agent.api.AgentRunStatus
-import com.mypersonalassistent.core.agent.api.AgentEvent
-import com.mypersonalassistent.core.agent.api.AgentTransition
-import com.mypersonalassistent.core.agent.api.CanonicalAgentState
-import com.mypersonalassistent.core.agent.api.RejectedTransitionReason
-import com.mypersonalassistent.core.agent.api.ResumeTarget
 import com.mypersonalassistent.core.agent.api.StartNewTask
 import com.mypersonalassistent.core.agent.api.PlanChangeContext
 import com.mypersonalassistent.core.history.api.AgentRecovery
@@ -29,9 +23,18 @@ import com.mypersonalassistent.core.memory.api.TaskMemory
 import com.mypersonalassistent.core.invariants.api.InvariantCategory
 import com.mypersonalassistent.core.invariants.api.InvariantRuleId
 import com.mypersonalassistent.core.invariants.api.SafeInvariantRefusal
+import com.mypersonalassistent.core.mcp.api.ChatMcpRepository
+import com.mypersonalassistent.core.mcp.api.McpPermission
+import com.mypersonalassistent.core.mcp.api.McpResult
+import com.mypersonalassistent.core.mcp.api.McpOperationCoordinator
+import com.mypersonalassistent.core.agent.api.PendingMcpCall
+import com.mypersonalassistent.core.agent.api.McpCallStatus
 import com.mypersonalassistent.feature.chat.api.ChatIntent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -112,7 +115,7 @@ class ChatStoreTest {
     @Test fun `saved chat recovery requires explicit continue and loads without provider call`() = runTest(dispatcher) {
         val engine = FakeEngine(decodedCheckpoint = AgentCheckpoint(
             chatId = "id", runId = "recovered", phase = AgentPhase.PLANNING,
-            runStatus = AgentRunStatus.PAUSED, expectedAction = "Продолжить",
+            runStatus = AgentRunStatus.ACTIVE, expectedAction = "Продолжить",
         ))
         val canonical = ChatSnapshot("id", "Сохранённый", 1, 2, listOf(ChatMessage("c", MessageRole.USER, "canonical")))
         val recovered = AgentRecovery(
@@ -151,12 +154,9 @@ class ChatStoreTest {
         store.dispose()
     }
 
-    @Test fun `task memory editor is blocked for waiting paused and failed runs`() = runTest(dispatcher) {
+    @Test fun `task memory editor is blocked for waiting and failed runs`() = runTest(dispatcher) {
         val waiting = store(engine = FakeEngine(questionFirst = true))
         waiting.accept(ChatIntent.ChangeDraft("Задача")); waiting.accept(ChatIntent.Send); testScheduler.advanceUntilIdle()
-        waiting.accept(ChatIntent.OpenTaskEditor)
-        assertFalse(waiting.state.taskEditorOpen)
-        waiting.accept(ChatIntent.Pause); testScheduler.advanceUntilIdle()
         waiting.accept(ChatIntent.OpenTaskEditor)
         assertFalse(waiting.state.taskEditorOpen)
         waiting.dispose()
@@ -166,25 +166,6 @@ class ChatStoreTest {
         failed.accept(ChatIntent.OpenTaskEditor)
         assertFalse(failed.state.taskEditorOpen)
         failed.dispose()
-    }
-
-    @Test fun `pause then resume waiting question restores it without another provider call`() = runTest(dispatcher) {
-        val engine = FakeEngine(questionFirst = true)
-        val store = store(engine = engine)
-        store.accept(ChatIntent.ChangeDraft("Задача")); store.accept(ChatIntent.Send); testScheduler.advanceUntilIdle()
-        val questionTranscript = store.state.messages.map { it.content }
-        val callsBeforePause = engine.providerCalls
-
-        store.accept(ChatIntent.Pause); testScheduler.advanceUntilIdle()
-        assertEquals(AgentRunStatus.PAUSED, store.state.checkpoint?.runStatus)
-        assertEquals(ResumeTarget.RESTORE_WAITING_ANSWER, store.state.checkpoint?.resumeTarget)
-
-        store.accept(ChatIntent.Resume); testScheduler.advanceUntilIdle()
-        assertEquals(AgentRunStatus.WAITING_USER, store.state.checkpoint?.runStatus)
-        assertEquals(questionTranscript, store.state.messages.map { it.content })
-        assertEquals(callsBeforePause, engine.providerCalls)
-        assertEquals(1, engine.resumes)
-        store.dispose()
     }
 
     @Test fun `discard recovery cancels through engine and restores local state`() = runTest(dispatcher) {
@@ -218,16 +199,59 @@ class ChatStoreTest {
         store.dispose()
     }
 
-    @Test fun `pause is delegated authoritatively while approval is waiting`() = runTest(dispatcher) {
-        val engine = FakeEngine(initialStatus = AgentRunStatus.WAITING_APPROVAL)
-        val store = store(engine = engine)
-        store.accept(ChatIntent.ChangeDraft("Задача")); store.accept(ChatIntent.Send); testScheduler.advanceUntilIdle()
+    @Test fun `disabling MCP cancels suspended call drops its late result and continues without MCP`() = runTest(dispatcher) {
+        val engine = FakeEngine(
+            initialStatus = AgentRunStatus.WAITING_MCP_APPROVAL,
+            blockMcpDecision = true,
+        )
+        val mcp = RecordingMcp()
+        val store = store(engine = engine, mcp = mcp)
 
-        store.accept(ChatIntent.Pause); testScheduler.advanceUntilIdle()
+        store.accept(ChatIntent.ChangeDraft("Задача")); store.accept(ChatIntent.Send)
+        testScheduler.advanceUntilIdle()
+        assertEquals(AgentRunStatus.WAITING_MCP_APPROVAL, store.state.checkpoint?.runStatus)
 
-        assertEquals(1, engine.pauses)
-        assertEquals(AgentRunStatus.PAUSED, store.state.checkpoint?.runStatus)
-        assertEquals(ResumeTarget.RESTORE_WAITING_APPROVAL, store.state.checkpoint?.resumeTarget)
+        store.accept(ChatIntent.DecideMcpCall("digest", allow = true))
+        testScheduler.runCurrent()
+        assertEquals(1, engine.mcpDecisions)
+
+        store.accept(ChatIntent.SetMcpPermission("server", enabled = false))
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(engine.lateMcpDecisionDelivered)
+        assertEquals(1, engine.interruptedMcp)
+        assertEquals(listOf("server" to false), mcp.changes)
+        assertTrue(store.state.mcpSuppressed)
+        assertEquals(AgentRunStatus.ACTIVE, store.state.checkpoint?.runStatus)
+        assertFalse(store.state.messages.any { it.content == "late MCP result" })
+
+        store.accept(ChatIntent.ChangeDraft("Продолжи без инструмента")); store.accept(ChatIntent.Send)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, engine.answers)
+        assertTrue(engine.answerSawMcpSuppressed)
+        assertEquals(AgentRunStatus.COMPLETED, store.state.checkpoint?.runStatus)
+        assertFalse(store.state.messages.any { it.content == "late MCP result" })
+        store.dispose()
+    }
+
+    @Test fun `catalog deletion cancels registered call and persists unknown normalization`() = runTest(dispatcher) {
+        val engine = FakeEngine(initialStatus = AgentRunStatus.WAITING_MCP_APPROVAL, blockMcpDecision = true)
+        val operations = RecordingOperations()
+        val store = store(engine = engine, operations = operations)
+        store.accept(ChatIntent.ChangeDraft("Задача")); store.accept(ChatIntent.Send)
+        testScheduler.advanceUntilIdle()
+        store.accept(ChatIntent.DecideMcpCall("digest", allow = true))
+        testScheduler.runCurrent()
+
+        operations.cancelAndJoin("server")
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(engine.lateMcpDecisionDelivered)
+        assertEquals(1, engine.interruptedMcp)
+        assertTrue(store.state.mcpSuppressed)
+        assertEquals(AgentRunStatus.ACTIVE, store.state.checkpoint?.runStatus)
+        assertFalse(store.state.messages.any { it.content == "late MCP result" })
         store.dispose()
     }
 
@@ -253,28 +277,13 @@ class ChatStoreTest {
         store.dispose()
     }
 
-    @Test fun `rejected pause keeps checkpoint and surfaces invalid transition`() = runTest(dispatcher) {
-        val engine = FakeEngine(initialStatus = AgentRunStatus.ACTIVE, rejectPause = true)
-        val store = store(engine = engine)
-        store.accept(ChatIntent.ChangeDraft("Задача")); store.accept(ChatIntent.Send)
-        testScheduler.advanceUntilIdle()
-        val before = requireNotNull(store.state.checkpoint)
-
-        store.accept(ChatIntent.Pause)
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(1, engine.pauses)
-        assertEquals(before, store.state.checkpoint)
-        assertEquals(AgentEvent.PAUSE, store.state.pauseRejectedTransition?.event)
-        assertEquals(RejectedTransitionReason.EVENT_NOT_ALLOWED, store.state.pauseRejectedTransition?.reason)
-        store.dispose()
-    }
-
     private fun store(
         engine: FakeEngine = FakeEngine(),
         recovery: FakeRecovery = FakeRecovery(),
         history: HistoryRepository = EmptyHistory,
-    ): ChatStore = ChatStoreFactory(DefaultStoreFactory(), "id", history, EmptyMemory, engine, recovery).create()
+        mcp: ChatMcpRepository = EmptyMcp,
+        operations: McpOperationCoordinator = EmptyOperations,
+    ): ChatStore = ChatStoreFactory(DefaultStoreFactory(), "id", history, EmptyMemory, engine, recovery, mcp = mcp, operations = operations).create()
 
     private class FakeEngine(
         private val questionFirst: Boolean = false,
@@ -283,13 +292,18 @@ class ChatStoreTest {
         private val decodedCheckpoint: AgentCheckpoint? = null,
         private val onDiscard: () -> Unit = {},
         private val refusalOnStart: SafeInvariantRefusal? = null,
-        private val rejectPause: Boolean = false,
+        private val blockMcpDecision: Boolean = false,
     ) : AgentRunEngine {
         private val checkpoints = MutableStateFlow<AgentCheckpoint?>(null)
         override val checkpoint: StateFlow<AgentCheckpoint?> = checkpoints
-        var starts = 0; var answers = 0; var resumes = 0; var retries = 0; var pauses = 0; var approvals = 0; var planChanges = 0; var continuedWithCurrentRules = 0; var providerCalls = 0; val discarded = mutableListOf<String>()
+        var starts = 0; var answers = 0; var retries = 0; var approvals = 0; var planChanges = 0; var continuedWithCurrentRules = 0; var providerCalls = 0; var interruptedForRecovery = 0; var mcpDecisions = 0; var interruptedMcp = 0; var lateMcpDecisionDelivered = false; var answerSawMcpSuppressed = false; val discarded = mutableListOf<String>()
         var lastPlanChange: PlanChangeContext? = null
-        private fun checkpoint(status: AgentRunStatus, expected: String = "Напишите новую задачу") = AgentCheckpoint("id", "run", phase = AgentPhase.DONE, runStatus = status, retryAllowed = retryAllowed, expectedAction = expected)
+        private fun checkpoint(status: AgentRunStatus, expected: String = "Напишите новую задачу") = AgentCheckpoint(
+            "id", "run", phase = AgentPhase.DONE, runStatus = status, retryAllowed = retryAllowed, expectedAction = expected,
+            pendingMcpCalls = if (status == AgentRunStatus.WAITING_MCP_APPROVAL) listOf(
+                PendingMcpCall("server", "lookup", "call", "{}", "digest", McpCallStatus.WAITING_CONFIRMATION),
+            ) else emptyList(),
+        )
         override suspend fun start(input: AgentRunInput): AgentRunResult {
             starts++; providerCalls++
             val result = when {
@@ -305,18 +319,30 @@ class ChatStoreTest {
             return result
         }
         override suspend fun answer(input: AgentRunInput): AgentRunResult {
-            answers++; providerCalls++
+            answers++; providerCalls++; answerSawMcpSuppressed = input.checkpoint?.mcpSuppressed == true
             return AgentRunResult(checkpoint(AgentRunStatus.COMPLETED), finalResult = "Готовый результат").also { checkpoints.value = it.checkpoint }
         }
-        override suspend fun resume(input: AgentRunInput): AgentRunResult {
-            resumes++
-            val checkpoint = requireNotNull(input.checkpoint)
-            return if (checkpoint.resumeTarget == ResumeTarget.RESTORE_WAITING_ANSWER) {
-                AgentRunResult(checkpoint.copy(runStatus = AgentRunStatus.WAITING_USER, pausedFromStatus = null, resumeTarget = ResumeTarget.NONE, expectedAction = "Ответьте на вопрос"))
-            } else {
-                providerCalls++
-                AgentRunResult(checkpoint)
-            }.also { checkpoints.value = it.checkpoint }
+        override suspend fun decideMcpCall(input: AgentRunInput, digest: String, allow: Boolean): AgentRunResult {
+            mcpDecisions++
+            if (blockMcpDecision) {
+                try {
+                    awaitCancellation()
+                } catch (_: CancellationException) {
+                    lateMcpDecisionDelivered = true
+                    return AgentRunResult(checkpoint(AgentRunStatus.COMPLETED), finalResult = "late MCP result")
+                }
+            }
+            return AgentRunResult(checkpoint(AgentRunStatus.COMPLETED)).also { checkpoints.value = it.checkpoint }
+        }
+        override suspend fun interruptMcp(input: AgentRunInput): AgentRunResult {
+            interruptedMcp++
+            val normalized = requireNotNull(input.checkpoint).copy(
+                runStatus = AgentRunStatus.ACTIVE,
+                mcpSuppressed = true,
+                inFlight = false,
+                expectedAction = "Продолжайте без MCP",
+            )
+            return AgentRunResult(normalized).also { checkpoints.value = it.checkpoint }
         }
         override suspend fun retry(input: AgentRunInput): AgentRunResult {
             retries++
@@ -336,26 +362,9 @@ class ChatStoreTest {
             continuedWithCurrentRules++
             return AgentRunResult(requireNotNull(input.checkpoint)).also { checkpoints.value = it.checkpoint }
         }
-        override suspend fun pause(input: AgentRunInput): AgentPauseResult {
-            pauses++
-            val checkpoint = checkpoints.value ?: requireNotNull(input.checkpoint)
-            if (rejectPause) return AgentPauseResult(
-                checkpoint = checkpoint,
-                rejectedTransition = AgentTransition.Rejected(
-                    reason = RejectedTransitionReason.EVENT_NOT_ALLOWED,
-                    currentState = CanonicalAgentState.DONE,
-                    event = AgentEvent.PAUSE,
-                    expectedActions = emptySet(),
-                ),
-            )
-            val paused = checkpoint.copy(
-                runStatus = AgentRunStatus.PAUSED,
-                pausedFromStatus = checkpoint.runStatus,
-                resumeTarget = if (checkpoint.runStatus == AgentRunStatus.WAITING_USER) ResumeTarget.RESTORE_WAITING_ANSWER else ResumeTarget.RESTORE_WAITING_APPROVAL,
-                expectedAction = "Продолжить",
-            )
-            checkpoints.value = paused
-            return AgentPauseResult(paused)
+        override suspend fun normalizeInterruptedForRecovery(input: AgentRunInput): AgentRunResult {
+            interruptedForRecovery++
+            return AgentRunResult(requireNotNull(input.checkpoint).copy(inFlight = false)).also { checkpoints.value = it.checkpoint }
         }
         override suspend fun persist(input: AgentRunInput) { checkpoints.value = input.checkpoint }
         var newTasks = 0
@@ -396,5 +405,36 @@ class ChatStoreTest {
         override suspend fun skipProfile(updatedAt: Long) = true
         override suspend fun clearProfile(updatedAt: Long) = true
         override suspend fun readTaskMemory(chatId: String) = TaskMemory(chatId)
+    }
+    private object EmptyMcp : ChatMcpRepository {
+        override suspend fun permissions(chatId: String): List<McpPermission> = emptyList()
+        override suspend fun setEnabled(chatId: String, serverId: String, enabled: Boolean): McpResult<Unit> = McpResult.Success(Unit)
+    }
+    private class RecordingMcp : ChatMcpRepository {
+        val changes = mutableListOf<Pair<String, Boolean>>()
+        override suspend fun permissions(chatId: String): List<McpPermission> = emptyList()
+        override suspend fun setEnabled(chatId: String, serverId: String, enabled: Boolean): McpResult<Unit> {
+            changes += serverId to enabled
+            return McpResult.Success(Unit)
+        }
+    }
+    private object EmptyOperations : McpOperationCoordinator {
+        override fun register(serverId: String, job: Job, invalidateBeforeCancellation: () -> Unit, normalizeAfterCancellation: suspend () -> Unit) = Unit
+        override fun unregister(serverId: String, job: Job) = Unit
+        override suspend fun cancelAndJoin(serverId: String) = Unit
+    }
+    private class RecordingOperations : McpOperationCoordinator {
+        private data class Registered(val serverId: String, val job: Job, val invalidate: () -> Unit, val normalize: suspend () -> Unit)
+        private var registered: Registered? = null
+        override fun register(serverId: String, job: Job, invalidateBeforeCancellation: () -> Unit, normalizeAfterCancellation: suspend () -> Unit) { registered = Registered(serverId, job, invalidateBeforeCancellation, normalizeAfterCancellation) }
+        override fun unregister(serverId: String, job: Job) { if (registered?.job == job) registered = null }
+        override suspend fun cancelAndJoin(serverId: String) {
+            val active = registered?.takeIf { it.serverId == serverId } ?: return
+            registered = null
+            active.invalidate.invoke()
+            active.job.cancel()
+            active.normalize.invoke()
+            active.job.join()
+        }
     }
 }

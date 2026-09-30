@@ -5,7 +5,9 @@ import com.mypersonalassistent.core.agent.api.AgentPhase
 import com.mypersonalassistent.core.agent.api.AgentRunStatus
 import com.mypersonalassistent.core.history.api.ChatMessage
 import com.mypersonalassistent.core.invariants.api.SafeInvariantRefusal
+import com.mypersonalassistent.core.llm.api.LlmError
 import com.mypersonalassistent.core.memory.api.TaskMemory
+import com.mypersonalassistent.core.mcp.api.McpPermission
 
 data class TaskMemoryDraft(
     val goal: String = "",
@@ -49,6 +51,7 @@ fun AgentCheckpoint?.toUiState(refusal: SafeInvariantRefusal? = this?.refusal): 
     val action = when (runStatus) {
         AgentRunStatus.ACTIVE -> AgentPrimaryAction.NONE
         AgentRunStatus.WAITING_APPROVAL -> AgentPrimaryAction.APPROVE_PLAN
+        AgentRunStatus.WAITING_MCP_APPROVAL -> AgentPrimaryAction.NONE
         AgentRunStatus.STALE_PAUSED -> AgentPrimaryAction.CONTINUE_WITH_CURRENT_RULES
         AgentRunStatus.REFUSED -> AgentPrimaryAction.OPEN_INVARIANTS
         AgentRunStatus.TERMINATED -> AgentPrimaryAction.START_NEW_TASK
@@ -59,6 +62,7 @@ fun AgentCheckpoint?.toUiState(refusal: SafeInvariantRefusal? = this?.refusal): 
     val expected = when {
         runStatus == AgentRunStatus.WAITING_USER -> expectedAction.ifBlank { "Ответьте на вопрос" }
         runStatus == AgentRunStatus.WAITING_APPROVAL -> expectedAction.ifBlank { "Утвердите план или попросите изменения" }
+        runStatus == AgentRunStatus.WAITING_MCP_APPROVAL -> expectedAction.ifBlank { "Подтвердите вызов MCP" }
         runStatus == AgentRunStatus.STALE_PAUSED -> expectedAction.ifBlank { "Правила изменились. Требуется новый план" }
         // A refusal is rendered only from the typed safe payload. Do not invent a generic
         // explanation: that would conceal the rule metadata the user needs to inspect.
@@ -101,9 +105,14 @@ data class ChatState(
     val planChangeComment: String = "",
     /** Presentation-only mirror of [AgentRunResult.refusal]; never contains a rule statement. */
     val refusal: SafeInvariantRefusal? = null,
+    val mcpSelectorOpen: Boolean = false,
+    val mcpPermissions: List<McpPermission> = emptyList(),
 ) {
     val safeRefusal: SafeInvariantRefusal? get() = refusal ?: checkpoint?.refusal
     val agentUi: AgentUiState get() = checkpoint.toUiState(safeRefusal)
+    val mcpApproval get() = checkpoint?.pendingMcpCalls?.firstOrNull { it.status == com.mypersonalassistent.core.agent.api.McpCallStatus.WAITING_CONFIRMATION }
+    val mcpSuppressed get() = checkpoint?.mcpSuppressed == true
+    val mcpOutcomeUnknown get() = checkpoint?.mcpOutcomeUnknown == true
     val sending: Boolean get() = checkpoint?.runStatus == AgentRunStatus.ACTIVE && checkpoint.inFlight
     /** FAILED is intentionally terminal for the composer: retry or an explicit new task is required. */
     val composerEditable: Boolean get() =
@@ -111,6 +120,7 @@ data class ChatState(
             null, AgentRunStatus.WAITING_USER, AgentRunStatus.COMPLETED, AgentRunStatus.TERMINATED -> true
             AgentRunStatus.ACTIVE -> !checkpoint.inFlight
             AgentRunStatus.WAITING_APPROVAL,
+            AgentRunStatus.WAITING_MCP_APPROVAL,
             AgentRunStatus.STALE_PAUSED,
             AgentRunStatus.FAILED,
             AgentRunStatus.REFUSED -> false
@@ -144,5 +154,21 @@ sealed interface ChatIntent {
     data object ConfirmSave : ChatIntent
     data object Discard : ChatIntent
     data object CloseDialog : ChatIntent
+    data object OpenMcp : ChatIntent
+    data object CloseMcp : ChatIntent
+    data class SetMcpPermission(val serverId: String, val enabled: Boolean) : ChatIntent
+    data class DecideMcpCall(val digest: String, val allow: Boolean) : ChatIntent
+    data object ReenableMcp : ChatIntent
 }
-sealed interface ChatEffect { data object TechnicalError : ChatEffect; data object NavigateHome : ChatEffect; data object OpenInvariants : ChatEffect }
+
+fun LlmError.toProviderErrorMessage(httpStatus: Int?): String = buildString {
+    append("Ошибка DeepSeek: ").append(name)
+    httpStatus?.let { append(" (HTTP ").append(it).append(')') }
+}
+sealed interface ChatEffect {
+    data object TechnicalError : ChatEffect
+    /** Deliberately bounded to an enum and status code; provider payloads stay below the UI API. */
+    data class ProviderError(val category: LlmError, val httpStatus: Int?) : ChatEffect
+    data object NavigateHome : ChatEffect
+    data object OpenInvariants : ChatEffect
+}
